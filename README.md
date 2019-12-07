@@ -4,7 +4,7 @@
 ┌─────────────────────────────────────────┐
 │  S  │  M  │  T  │  W  │  R  │  F  │  S  │
 ├─────────────────────────────────────────┤
-│  <a href="#day-1">1</a>  │  <a href="#day-2">2</a>  │  <a href="#day-3">3</a>  │  4  │  5  │  6  │  7  │
+│  <a href="#day-1">1</a>  │  <a href="#day-2">2</a>  │  <a href="#day-3">3</a>  │  <a href="#day-4">4</a>  │  5  │  6  │  7  │
 ├─────────────────────────────────────────┤
 │  8  │  9  │ 10  │ 11  │ 12  │ 13  │ 14  │
 ├─────────────────────────────────────────┤
@@ -15,6 +15,42 @@
 │ 29  │ 30  │ 31  │     │     │     │     │
 └─────────────────────────────────────────┘
 </pre>
+
+# Day 4
+## Part One
+
+Call a number that meets the stated criteria _admissible_ and note that the set {353,096, …, 843,212} (my input range, yours is likely different) can be written as: ({353,096, …, 355,554} ∪ {355,555, …, 399,999} ∪ {400,000, …, 444,443} ∪ {444,444, …, 999,999}) ∖ ({843,213, …, 888,887} ∪ {888,888, …, 999,999}). There are no numbers in the sets {353,096, …, 355,554}, {400,000, …, 444,443}, {843,213, …, 888,887} with a non-decreasing digit sequence, and so the set of admissible numbers between 353,096 and 843,212 can be written as ({355,555, …, 399,999} ∪ {444,444, …, 999,999}) ∖ {888,888, …, 999,999}. 
+
+To count the number of admissible numbers in the first set, {355,555, …, 399,999}, notice that the last five digits must be chosen from the set {5, 6, 7, 8, 9} and can be chosen with replacement. Choice here is in the n choose k sense (i.e. counting / permutations / binomial coefficients). If (n k) denotes n choose k, then ((n+k-1) k) is the formula for choosing k items from a set of n elements with replacement. Any choice represents a specific selection--say for example that the five choices are 5, 6, 6, 7, and 8 then the selected number is 356,678. The only invalid choices are those without numbers repeated, which can be counted just as (n k).
+
+Likewise, to count the second set one must choose six digits from {4, 5, 6, 7, 8, 9} and similarly remove choices without repetition.
+
+Finally counting the last set involves choosing six digits from {8, 9}; since all of these have repeated digits (pigeon hole principle), no subtraction must be made to counter balance earler subtractions.
+
+In APL, (n k) is written `k!n` and so this problem's solution is
+```
+((5!5+5-1) + (6!6+6-1)) - ((5!5) + (6!6) + (6!6+2-1))
+```
+
+## Part Two
+
+For part two the same three sets will be used to compute the final value with the new admissibility criteria. The set {355,555, …, 399,999}'s admissible values can be found by choosing which of the five digits we want to be expressed _exactly_ twice (there are obviously five options). After this choice there are three positions left with four digits to select to fill them with using replacement, so the initial count for this set is 5 * ((3+4-1) 3).
+
+But some choices are double counted in this method (such as 355,667, counted for both the choice of 5 and 6 as the explicitly doubled digit). The number of times such a choice is double counted can be calculated as follows: for five spaces, we choose _two_ digits to explicitly double and then have three choices for the remaining digit, so 3 * (5 2) must be subtracted from the initial count.
+
+Considering the set {444,444, …, 999,999} and following the same logic there are six choices of numbers to explicitly double with four spaces left to be filled by five digits to be chosen with replacement, giving an initial count of 6 * ((4+5-1) 4).
+
+The number of double counted values with exactly two digits counted as being explicitly doubled is given by (6 2) * (4 2) since there are six digits to choose the two doubled digits and there are four choices to select the remaining two digits. Additionally, there can be triple counted values, and for six possibilities selecting three values gives (6 3), but each is counted three times so 2 * (6 3) must be subtracted.
+
+Finally, {888,888, …, 999,999} only has two admissible values: {888,899, 889,999}. Writing this all in APL gives:
+```
+((5×3!3+4-1) + (6×4!4+5-1)) - ((3×2!5) + ((2!6)×(2!4)) + (2×3!6) + 2)
+```
+
+Note that if in calculating the double count in the second set the remaining two digits were allowed to also be the same--i.e. instead of (6 2) * (4 2) use (6 2) * ((4+2-1) 2)--then by the principle of inclusion exclusion the triple counted values must be added instead of doubled and subtracted.
+```
+((5×3!3+4-1) + (6×4!4+5-1) + (3!6)) - ((3×2!5) + ((2!6)×(2!4+2-1)) + 2)
+```
 
 # Day 3
 ## Part One
