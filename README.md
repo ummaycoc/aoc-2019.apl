@@ -4,7 +4,7 @@
 ┌─────────────────────────────────────────┐
 │  S  │  M  │  T  │  W  │  R  │  F  │  S  │
 ├─────────────────────────────────────────┤
-│  <a href="#day-1">1</a>  │  <a href="#day-2">2</a>  │  <a href="#day-3">3</a>  │  <a href="#day-4">4</a>  │  5  │  6  │  7  │
+│  <a href="#day-1">1</a>  │  <a href="#day-2">2</a>  │  <a href="#day-3">3</a>  │  <a href="#day-4">4</a>  │  <a href="#day-5">5</a>  │  6  │  7  │
 ├─────────────────────────────────────────┤
 │  8  │  9  │ 10  │ 11  │ 12  │ 13  │ 14  │
 ├─────────────────────────────────────────┤
@@ -15,6 +15,128 @@
 │ 29  │ 30  │ 31  │     │     │     │     │
 └─────────────────────────────────────────┘
 </pre>
+
+# Day 5
+## Part One
+
+The solution to this problem will require the `split` function that has already become prolific here:
+```
+split ← {(0=⍺|¯1+⍳≢⍵)⊂⍵}
+```
+
+The first significant step, then, is to parse out the next operation from the program. Given the current program memory and a (zero-relative) program counter, this function will return the functional opcode (i.e. 1, 2, 3, or 4) along with the input and output addresses:
+```
+parseOp ← { ⍝ state parseOp counter → code (input addrs) (output addrs)
+  parsed ← 10 10 10 100⊤⍺[1+⍵]
+  modes ← ⌽1+3↑parsed
+  code ← ¯1↑parsed
+  imm ← ⍵+⍳3
+  pos ← ⍺[(1+imm)⌊≢⍺]
+  idx ← (modes,⍳3)[⍋(⍳3),⍳3]
+  addrs ← (2 3⍴pos,imm)[2 split idx]
+  nin ← (2 2 0 1)[code]
+  nout ← (1 1 1 0)[code]
+  ins ← nin↑addrs
+  addrs ← nin↓addrs
+  outs ← nout↑addrs
+  code ins outs
+}
+```
+
+The first line of the function has a new symbol, `⊤`, called the down tack. This function will encode the value on the right in the (possibly mixed) radixes on the left. The example displayed in Dyalog is `24 60 60 ⊤ 10000` which encodes 10,000 seconds as 2 days, 46 minutes, and 40 seconds (i.e. the result is `2 46 40`). Here it is used to pick out the actual opcode and the parameter modes. Modes are picked out by using `3↑parsed` to grab the first three elements in `parsed` and since these values will be used as an index they are incremented. `⌽` reverses their order since parameter modes are read right to left. The opcode is the last element in `parsed`, given by `¯1↑parsed`.
+
+As `⍵` is the program counter, `⍵+⍳3` will be the addresses of any of its input/output parameters (assuming there are any), and so these are also the addresses of any parameters in immediate mode. `⍺[(1+imm)⌊≢⍺]` are the values at these positions (`⌊` is the minimum of its left and right arguments, thus there will be no index error here).
+
+Combining the positional and immediate addresses as rows in a matrix, individual elements can be picked out with a nested array of indices (i.e. an array where each item is a vector with a row and column index). This is what `(2 3⍴pos,imm)[2 split idx]` does as `split` yields exactly the type of indexing array needed. `idx` is the interleaving of `modes` and `1 2 3` so that `modes` will select rows and `1 2 3` are column indices. Thus, `addrs` will be the appropriate addresses for given the parameter modes previously parsed out.
+
+`nin` and `nout` describe how many input and output parameters each opcode has and using `↑` and `↓` to manipulate `addrs` the required addresses are stored in `ins` and `outs`.
+
+Now that the information relevant to the next operation can be parsed from the program memory, it's time to write a function to execute a single step of the program:
+```
+step ← { ⍝ step (program-counter state input output)
+  p ← ⊃⍵[1]
+  s ← ⊃⍵[2]
+  i ← ⊃⍵[3]
+  o ← ⊃⍵[4]
+  parsed ← s parseOp p ⍝ has code (input addrs) (output addrs)
+  code ← ⊃parsed[1]
+  ins ← s[1+⊃parsed[2]]
+  outs ← 1+⊃parsed[3]
+  output ← ∊o,∊(⍬ ⍬ ⍬ ins)[code]
+  res ← ∊((+/ins) (×/ins) (⊃1↑i,0) 0)[code]
+  s[∊outs] ← ∊(res res res ⍬)[code]
+  (p+1+≢∊ins,outs) s ((code=3)↓i) output
+}
+```
+
+This function names its args (`p` for program counter, `s` for state, `i` for input-stream, `o` for output-stream) and parses the next command to execute. The addresses used in `ins` are incremented because Dyalog is one-relative and intcode is zero-relative; likewise with `outs`.
+
+`output` appends the any output from the code. It does this by picking out what would be outputted by indexing by `code`; since there is only output when `code` is `4`, all other indices are `⍬`, the empty numerical vector.
+
+To calculate the result to store, all possible values are calculated independent of `code` and the correct one is picked out by indexing and then stored in `s`. Since no data is stored when `code` is `4`, again the emtpy vector is used.
+
+Finally the returned program counter is returned--advanced by 1 to account for the consumed program counter and then by the count of all parameters, both in and out. The input stream is advanced if it was used.
+
+Bringing it all together, the following function will run an intcode program:
+```
+run ← { ⍝ input-stream run program
+  test ← {
+    pc ← ⊃⍺[1]
+    state ← ⊃⍺[2]
+    code ← 100|state[1+pc]
+    ~code∊1 2 3 4
+  }
+  program ← ⍵
+  input ← ⍺
+  output ← ⍬
+  step⍣test 0 program input output
+}
+```
+
+This uses the `power` operator to calculate a fixpoint via the `test` function above, and is straight forward.
+
+## Part Two
+
+The solution to part two involves some minor changes and one substantial but not overwhelming. In `parseOp` the lines calculating `nin` and `nout` become:
+```
+  nin ← (2 2 0 1 2 2 2 2)[code]
+  nout ← (1 1 1 0 0 0 1 1)[code]
+```
+to reflect the new instructions. In `run` the last line of the `test` function becomes
+```
+    ~code∊1 2 3 4 5 6 7 8
+```
+to reflect the new instructions' op codes.
+
+The bulk of the changes, obviously, are in the `step` function as this handles actual logic. The function now looks like:
+```
+step ← { ⍝ step (program-counter state input output)
+  p ← ⊃⍵[1]
+  s ← ⊃⍵[2]
+  i ← ⊃⍵[3]
+  o ← ⊃⍵[4]
+  parsed ← s parseOp p ⍝ has code (input addrs) (output addrs)
+  code ← ⊃parsed[1]
+  ins ← s[1+⊃parsed[2]]
+  outs ← 1+⊃parsed[3]
+  output ← ∊o,∊(⍬ ⍬ ⍬ ins ⍬ ⍬ ⍬ ⍬)[code]
+  res ← ∊((+/ins) (×/ins) (⊃1↑i,0) 0 0 0 (</ins) (=/ins))[code]
+  next ← p+1+≢∊ins,outs
+  jump ← (∊ins,0,0)[2]
+  zero ← 0=(∊ins,0)[1]
+  jnz ← (next jump)[1+~zero]
+  jz ← (next jump)[1+zero]
+  p ← (next next next next jnz jz next next)[code]
+  s[∊outs] ← ∊(res res res ⍬ ⍬ ⍬ res res)[code]
+  (⊃p) s ((code=3)↓i) output
+}
+```
+Every lines from when `output` is assigned is either new or has changed. The assignments to `output`, `res`, and `s[∊outs]` have changed in simple ways to reflect the new commands. The change on the last line merely reflects that the program counter being returned is calculated a few lines earlier.
+
+The other lines, from the assignment to `next` down to the assignment to `p`, involve calculating the program counter in the presence of possible jumps. `next` is what the program counter will be in the absence of a jump and `jump` stores the address of the jump destination when present. `zero` tests if the first parameter is zero or not. When `zero` is true, `jnz` is just `next` and `jz` will be set to `jump`; when `zero` is false, the roles are switched. Finally, the program counter is picked out of an array based on the current opcode.
+
+* [Day 5, Part 1](https://github.com/ummaycoc/aoc-2019.apl/blob/master/src/Day5/day5-part1.apl).
+* [Day 5, Part 1](https://github.com/ummaycoc/aoc-2019.apl/blob/master/src/Day5/day5-part2.apl).
 
 # Day 4
 ## Part One
