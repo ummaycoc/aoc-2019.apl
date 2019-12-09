@@ -4,7 +4,7 @@
 ┌─────────────────────────────────────────┐
 │  S  │  M  │  T  │  W  │  R  │  F  │  S  │
 ├─────────────────────────────────────────┤
-│  <a href="#day-1">1</a>  │  <a href="#day-2">2</a>  │  <a href="#day-3">3</a>  │  <a href="#day-4">4</a>  │  <a href="#day-5">5</a>  │  6  │  7  │
+│  <a href="#day-1">1</a>  │  <a href="#day-2">2</a>  │  <a href="#day-3">3</a>  │  <a href="#day-4">4</a>  │  <a href="#day-5">5</a>  │  <a href="#day-6">6</a>  │  7  │
 ├─────────────────────────────────────────┤
 │  8  │  9  │ 10  │ 11  │ 12  │ 13  │ 14  │
 ├─────────────────────────────────────────┤
@@ -27,6 +27,134 @@ input ← ¯1↓⊃read[1]
 The drop is usually useful in AoC as it removes the trailing newline from the data. If the data is already in the form of APL data (i.e. an array), then it can be executed with the hydrant symbol `⍎`.
 
 ---
+
+# Day 6
+## Part One
+
+The first step, of course, is to parse the orbits data:
+```
+parseOrbits ← { ⍝ parseOrbits string
+  eoln ← 'UTF-8'⎕UCS 10
+  orbits ← eoln (≠⊆⊢) input
+  split ← {')' (≠⊆⊢) ⍵}¨orbits
+  (⊃¨split) {(⊃⍺)⍵}⌸ ((⊃⌽)¨split)
+}
+```
+
+There is a lot of new stuff going on here:
+* _Unicode:_ `'UTF-8'⎕UCS 10` encodes the line feed character in UTF-8.
+* _Right:_ `⊢` is a simple function that returns its righthand argument (even when there's no lefthand). There's a corresponding `⊣` for the lefthand argument.
+* _Partition:_ `⊆` is the partition function. Given a boolean mask on the left, collect values from the right where there is a non-zero the left just like the compress function `mask / vector` -- however, partition will group runs together. That is, `1 0 0 1 1 ⊆ ⍳5` yields an array where the first element is a vector containing just 1 and the second is a vector containing both 4 and 5.
+* _Trains:_ Three functions together can form what is called a train, as in `(≠⊆⊢)`, and the train will be a new function. In this case it will be equivalent to `{ (⍺ ≠ ⍵) ⊆ (⍺ ⊢ ⍵) }` as the train "splits" its arguments between the its outer functions and uses its inner function to combine the results. Given the definition of `⊢`, this train is equivalent to `{ (⍺ ≠ ⍵) ⊆ ⍵ }`, i.e. partition the righthand argument by splitting on occurrences of the lefthand argument.
+* _Key:_ The key operator `⌸` creates a derived function `left (f⌸) right` that will receive unique elements of `left` with associated elements from `right`. The result is a matrix where the rows will be the results of each application of `f`. The following is based an example in Dyalog:
+
+```
+'Banana' {⍺⍵}⌸ ⍳⍴'Banana'
+⍝ Above yields a 3 row, 2 column matrix:
+⍝   B ( 1 )
+⍝   a ( 2 4 6 )
+⍝   n ( 3 5 )
+⍝ The first column has `'B'`, `'a'`, and `'n'`, the second column are the
+⍝ positions where those values were found (since we passed in `⍳⍴'Banana'`
+⍝ as the righthand argument).
+
+'Banana' {⍺⍵}⌸ 'Orange'
+⍝ Again this yields a 3 row, 2 column matrix as the unique elements of
+⍝ 'Banana' are the same:
+⍝   B O   
+⍝   a rne 
+⍝   n ag 
+⍝ This highlights that the values for the key are drawn from the right.
+
+'Banana' {⍵}⌸ 'Orange'
+⍝ Here the result of the operated function is just the key's values:
+⍝   O  
+⍝   rne
+⍝   ag
+
+⍝ One last example: finding the last occurrence of a value:
+'Banana'{⍺(⌈/⍵)}⌸⍳⍴'Banana'
+⍝   B 1
+⍝   a 6
+⍝   n 5
+```
+
+Thus the result of `parseOrbits` will be a two column matrix where the second column contains a list of what orbits the single item in the first column. That is, it produces an adjacency list representation of the orbit graph with edges going from the orbited to the orbiter. For such a given representation, it will be necessary to map from a set of objects to the combined set of everything orbiting around those objects:
+```
+step ← { ⍝ adj-list-rep step objects → orbiters
+  nodes ← ⍺[;1]
+  nbrs ← ⍺[;2]
+  mask ← ⊃∨/{(⊂,⍵)⍷nodes}¨⍵
+  ⊃,/mask/nbrs
+}
+```
+This simple function uses `⍷`, the find function, to create a boolean mask of rows objects listed in the righthand argument appear as keys (i.e. orbited objects). The find function works by returning a boolean vector denoting where its lefthand argument appears in its righthand argument. Using `∨/` to combine the repeated uses of `⍷` (since `¨`, remember, is a mapping operator) results in a mask denoting the rows where any of the elements in the righthand argument to step appear. The last line uses the mask to pick out the neighbors from those rows and `,/` will enlist them all together.
+
+Using the `step` function to iterate "levels" of orbit away from `'COM'` the problem can be solved:
+```
+checksum ← { ⍝ adj-list-rep         
+  data ← ⍵
+  calc ← { ⍝ (sum depth level) -> (sum' depth' level')
+    sum ← ⍵[1]
+    depth ← ⍵[2]
+    level ← ⊃⍵[3]
+    (sum+depth×≢level) (depth+1) (data step level)
+  }
+  calc⍣{0=≢⊃⍵[3]} 0 0 (⊂,'COM')
+}
+```
+Here the iteration is taken care of with the power operator `⍣` to find a fixpoint determined by whether there are any other objects left to account for.
+
+## Part Two
+
+Part two is similar to part one, but the problem is easier with a different graph representation:
+```
+parseOrbiting ← { ⍝ parseOrbiting string
+  eoln ← 'UTF-8'⎕UCS 10
+  orbits ← eoln (≠⊆⊢) input
+  split ← {')'(≠⊆⊢)⍵}¨orbits
+  ((⊃⌽)¨split) {(⊃⍺) (⊃⍵)}⌸ (⊃¨split)
+}
+```
+The only differences with `parseOrbits` are that `parseOrbiting` switches which side gets `((⊃⌽)¨split)` and which gets `(⊃¨split)` and now `⊃` is applied to `⍵` to pick out the first (and only) element. Since the key is now the orbiting element the value is the orbited, this is a predecessor / parent representation of the orbit graph.
+
+Given the above representation, it is easy to calculate the path from the root (`'COM'`) to a specific object (`'YOU'` or `'SAN'`):
+```
+path ← { ⍝ matrix node→neighbors start
+  data ← ⍺
+  calc ← { ⍝ (path level) -> (path' level')
+    path ← ⊃⍵[1]
+    level ← ⊃⍵[2]
+    next ← data step level
+    (path,level) (⊂,next)
+  }
+  ⌽⊃calc⍣{0=≢⊃⊃⍺[2]}⍬(⊂,⍵)
+}
+```
+Here `step` is the same as in part one since it will still work on this representation as all it does is union the second column of several rows.
+
+Finally, finding the total number of transfers between two objects can be calculated once we have their paths to the root:
+```
+transfers ← { ⍝ node-parent-matrix transfers (start end)
+  ps←⍺ path⊃⍵[1]
+  pe←⍺ path⊃⍵[2]
+  short←(≢ps)⌊(≢pe)
+  diff←~(∧/)¨(short↑ps)=(short↑pe)
+  mask←{diff,((≢⍵)-short)⍴1}
+  bs←≢¯1↓(mask ps)/ps
+  be←≢¯1↓(mask pe)/pe
+  bs+be-≠/0=bs be
+}
+```
+
+Invoking `parents transfers ('YOU') ('SAN')` will first store the paths to the root for `'YOU'` and `'SAN'` in `ps` and `pe`, respectively, and the minimum of their lengths into `short`. Since the root is a common element there is a last common element, and `(∧/)¨(short↑ps)=(short↑pe)` will find it -- it compares the initial segment of both paths (based on the shorter of the two) and determines where they are equal. `diff` is merely the negation of this vector (and so describes where the two paths diverge, if at all).
+
+Given `diff`, `mask` will take a path and return those objects that were not marked as being the same. `bs` and `be` (`b` for branch) are the lengths of the final segments of `ps` and `pe` based on this information--the last node dropped from `ps` and `pe` are their closest common ancestor. The result is their sum minus 1 if either start or end is on the path to the root of the other and they differ.
+
+* [Day 6, Part 1](https://github.com/ummaycoc/aoc-2019.apl/blob/master/src/Day06/day6-part1.apl).
+* [Day 6, Part 2](https://github.com/ummaycoc/aoc-2019.apl/blob/master/src/Day06/day6-part2.apl).
+
+[This Day](#day-6) ◈ [Calendar](#december-2019) ◈ Next Day
 
 # Day 5
 ## Part One
@@ -150,7 +278,7 @@ The other lines, from the assignment to `next` down to the assignment to `p`, in
 * [Day 5, Part 1](https://github.com/ummaycoc/aoc-2019.apl/blob/master/src/Day05/day5-part1.apl).
 * [Day 5, Part 2](https://github.com/ummaycoc/aoc-2019.apl/blob/master/src/Day05/day5-part2.apl).
 
-[This Day](#day-5) ◈ [Calendar](#december-2019) ◈ Next Day
+[This Day](#day-5) ◈ [Calendar](#december-2019) ◈ [Next Day](#day-6)
 
 # Day 4
 ## Part One
