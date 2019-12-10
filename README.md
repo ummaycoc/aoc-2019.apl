@@ -4,7 +4,7 @@
 ┌─────────────────────────────────────────┐
 │  S  │  M  │  T  │  W  │  R  │  F  │  S  │
 ├─────────────────────────────────────────┤
-│  <a href="#day-1">1</a>  │  <a href="#day-2">2</a>  │  <a href="#day-3">3</a>  │  <a href="#day-4">4</a>  │  <a href="#day-5">5</a>  │  <a href="#day-6">6</a>  │  7  │
+│  <a href="#day-1">1</a>  │  <a href="#day-2">2</a>  │  <a href="#day-3">3</a>  │  <a href="#day-4">4</a>  │  <a href="#day-5">5</a>  │  <a href="#day-6">6</a>  │  <a href="#day-7">7</a>  │
 ├─────────────────────────────────────────┤
 │  8  │  9  │ 10  │ 11  │ 12  │ 13  │ 14  │
 ├─────────────────────────────────────────┤
@@ -27,6 +27,149 @@ input ← ¯1↓⊃read[1]
 The drop is usually useful in AoC as it removes the trailing newline from the data. If the data is already in the form of APL data (i.e. an array), then it can be executed with the hydrant symbol `⍎`.
 
 ---
+
+# Day 7
+## Part One
+
+As a preliminary step, define the following function which returns the rows of a matrix as a nested list of those rows:
+```
+rows ← { ⍝ rows mat
+  mat ← ⍵
+  {mat[⍵;]}¨⍳(⍴mat)[1]
+}
+```
+
+There's nothing new or exciting about the above, but `rows` can be used to create permutations:
+```
+perms ← { ⍝ perms vector → matrix of perms
+  il ← { ⍝ val il vec
+    val ← ⍺
+    vec ← ⍵
+    n ← 1+≢vec
+    n n⍴∊{(⍵↑vec),val,(⍵↓vec)}¨¯1+⍳n
+  }
+  ilm ← { ⍝ value ilm matrix
+    val ← ⍺
+    ⊃,[1]/{val il ⍵}¨rows ⍵
+  }
+  init ← 1 1⍴⍵,0
+  items ← 1↓⍵
+  next ← { ⍝ next index matrix → index' matrix'
+    idx ← ⍵[1]
+    mat ← ⊃⍵[2]
+    (1+idx) (items[idx] ilm mat)
+  }
+  nr ← (0<≢⍵)×!≢⍵
+  nc ← ≢⍵
+  nr nc⍴2⊃(next⍣(≢items))1 init
+}
+```
+
+There's nothing too new about any of this code, except for maybe that the righthand argument to `⍣` on the last line is now a number instead of a predicate. When given a number, `⍣` will apply the function on its left that many times instead of until a condition is met--that is, it's a for loop whereas before it was used as a while loop. Additionally, that line uses `2⊃`: just as `⊃` got the first item out of an array, `2⊃` will get the second.
+
+As far as _how_ `perm` works, `il` is a function that interleaves a value across a vector and returns the matrix of results. So `3 il 1 2` would result in:
+```
+3 1 2
+1 3 2
+1 2 3
+```
+It does this by first taking 0 items from `vec` (`0↑1 2` in this case, empty), appending `val` (`3` in this case), and then appending the drop of `0` items from `vec` (`0↓1 2` is `1 2` in this case). This is repeated for taking/dropping 1 item, 2 items, etc up until all items are taken, `val` is appended, and then appending whatever is left after dropping all the items (nothing is left).
+
+Just as `il` interleaved a value across a vector, `ilm` interleaves a value across the rows of a matrix. This just applies `il` to every row, making a new matrix of values based on every row. These matrices are then stitched together vertically by `,[1]/` which will append along the vertical axis.
+
+The first item in the list of those to be permuted is stored in the 1x1 matrix `init`, the rest of the items are stored in `items`. The function `next` takes the permutations calculated so far and interleaves the next value across the rows to create the next permutation (the "next" item is determined using an index into `items` that increments across iterations).
+
+The final result is calculated using the iterative for-loop version of `⍣` described above. The lines before calculate the proper number of rows and columns and the result is reshaped using those; this ensures that the permutation of the empty list is again empty.
+
+The following brings the two functions together to solve the problem:
+```
+maxamp ← { ⍝ maxamp program
+  prg ← ⍵
+  amp ← {
+    res ← ⊃((⌽2↑⍵)run prg)[4]
+    res,2↓⍵
+  }
+  ⌈/{⊃(amp⍣5)0,⍵}¨rows perms ¯1+⍳5
+}
+```
+
+This uses the `run` function from day 5 (part 2). `amp` will run the program on the _next_ amplifier with the required inputs and grab the output, prepending it to the input stream for the next iteration. The `⍣` function is used to iteratively apply this five times, consuming the input and running the sequentially on all five amplifiers. The input consists of phases, which are iterated as rows of permutations of `0 1 2 3 4`. The maximum such output is returned by reducing `⌈`.
+
+## Part Two
+
+Part two also builds on the second part of Day 5--using that solution's `parseOp` and `step` functions (and, of course, `split`) but using a different `run` function. The `run` function used will be a procedural function so as to allow zero iterations of a loop (whereas a predicate applied to `⍣` guarantees one iteration). The function is:
+```
+res ← pc run program;opcodes
+  opcodes ← 1 2 5 6 7 8
+  :While (100|program[1+pc])∊opcodes
+    pc program ← (step pc program ⍬ ⍬)[1 2]
+  :EndWhile
+  res ← pc program
+```
+
+This function is pretty simple--it accepts a program counter and a program and runs continuously, updating both, as long as none of the opcodes halt or ask for IO. This also shows a destructuring parallel assignment (which is something I didn't know about and found out it worked by testing it).
+
+While `run` is relatively simple, the meat of the problem is not so easy on the eyes and is again a procedural function (for reasons that should be clear):
+```
+res ← phases seq program;pc;mem;pcs;ins;lasts;amp;code;codes;temp;next;done
+  mem ← {program}¨phases
+  pcs ← (≢phases)⍴0
+  ins ← {1⍴⍵}¨phases
+  ins[1] ← ⊂(1⊃ins),0
+  lasts ← (≢phases)⍴0
+  amp ← 1
+  next ← 1⌽⍳≢phases
+  done ← (≢phases)⍴0
+  codes ← 1 2 3 4 5 6 7 8 99 ⍝ valid codes
+  :While ~¯1↑done
+    code ← 100|(amp⊃mem)[1+pcs[amp]]
+    :If done[amp]
+      amp ← next[amp] ⍝ Maybe this should be an error.
+    :ElseIf (code=3)∧(0=≢amp⊃ins) ⍝ No input left, loop
+      amp ← next[amp]
+    :ElseIf code=99
+      done[amp] ← 1
+      amp ← next[amp]
+    :ElseIf code=3
+      pc program ← (step pcs[amp](amp⊃mem)(amp⊃ins)⍬)[1 2]
+      pcs[amp] ← pc
+      mem[amp] ← ⊂program
+      ins[amp] ← ⊂1↓(amp⊃ins)
+    :ElseIf code=4
+      pc temp ← (step pcs[amp](amp⊃mem)⍬ ⍬)[1 4]
+      pcs[amp] ← pc
+      lasts[amp] ← 1⊃temp
+      ins[next[amp]] ← ⊂((next[amp]⊃ins),1⊃temp)
+    :ElseIf code∊codes
+      pc program ← (pcs[amp]run amp⊃mem)[1 2]
+      pcs[amp] ← pc
+      mem[amp] ← ⊂program
+    :Else
+      ('Unknown code ',⍕code)⎕SIGNAL 200
+    :EndIf
+  :EndWhile
+  res ← ¯1↑lasts
+```
+
+The first few lines establish the initial state and constants. `mem` is the program state for each amplifier, copying the program once for each. `pcs` are the program counters, one for each amplifier and initially zero. The inputs for each amplifier are initially set to be one element vectors containing their phases, with the first amplifier having an additional zero appended to its initial input. `lasts` tracks the last output of each amplifier (initially set to zero). `amp` is the index of the current amplifier and `next` maps to the index of the next amplifier as `1⌽` rotates its righthand argument one to the right. `done` keeps track of whether an amplifier is finished (reached code 99) and codes is a list of all the valid codes.
+
+The while loop is where the action is and is used to thread amplifier outputs to amplifier inputs. The main points of interest are in the `code=3`, `code=4`, and `code∊codes` branches. In the `code=3` branch the program is run for _one step_ on the current amplifier with the input queue associated with that amplifier. In the `code=4` branch the program is run for _one step_ on the current amplifier and the output is appended to the _next_ amplifier's input queue. In the `code∊codes` branch, which covers all valid codes _not already considered_, the program is run on the current amplifier up to the next input, output, or halt command.
+
+The final branch within the loop uses the `⍕` function, which formats values into strings.
+
+Using the `perms` and `rows` functions from part one, finding the phase setting that maximizes the final output can be accomplished with:
+```
+maxamp ← { ⍝ maxamp program
+  prg ← ⍵
+  amp ← {⍵ seq prg}
+  ⌈/amp¨rows perms 4+⍳5
+}
+```
+
+* [Day 7, Part 1](https://github.com/ummaycoc/aoc-2019.apl/blob/master/src/Day07/day7-part1.apl).
+* [Day 7, Part 2](https://github.com/ummaycoc/aoc-2019.apl/blob/master/src/Day07/day7-part2.apl).
+
+[This Day](#day-7) ◈ [Calendar](#december-2019) ◈ Next Day
 
 # Day 6
 ## Part One
@@ -154,7 +297,7 @@ Given `diff`, `mask` will take a path and return those objects that were not mar
 * [Day 6, Part 1](https://github.com/ummaycoc/aoc-2019.apl/blob/master/src/Day06/day6-part1.apl).
 * [Day 6, Part 2](https://github.com/ummaycoc/aoc-2019.apl/blob/master/src/Day06/day6-part2.apl).
 
-[This Day](#day-6) ◈ [Calendar](#december-2019) ◈ Next Day
+[This Day](#day-6) ◈ [Calendar](#december-2019) ◈ [Next Day](#day-7)
 
 # Day 5
 ## Part One
