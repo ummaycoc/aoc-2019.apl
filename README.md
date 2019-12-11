@@ -6,7 +6,7 @@
 ├─────────────────────────────────────────┤
 │  <a href="#day-1">1</a>  │  <a href="#day-2">2</a>  │  <a href="#day-3">3</a>  │  <a href="#day-4">4</a>  │  <a href="#day-5">5</a>  │  <a href="#day-6">6</a>  │  <a href="#day-7">7</a>  │
 ├─────────────────────────────────────────┤
-│  8  │  9  │ 10  │ 11  │ 12  │ 13  │ 14  │
+│  <a href="#day-8">8</a>  │  9  │ 10  │ 11  │ 12  │ 13  │ 14  │
 ├─────────────────────────────────────────┤
 │ 15  │ 16  │ 17  │ 18  │ 19  │ 20  │ 21  │
 ├─────────────────────────────────────────┤
@@ -27,6 +27,58 @@ input ← ¯1↓⊃read[1]
 The drop is usually useful in AoC as it removes the trailing newline from the data. If the data is already in the form of APL data (i.e. an array), then it can be executed with the hydrant symbol `⍎`.
 
 ---
+
+# Day 8
+## Part One
+
+Again the `split` function will come in handy:
+```
+split ← {(0=⍺|¯1+⍳≢⍵)⊂⍵}
+```
+
+Given that the input is in a character string (no need to convert to integers), the problem can be solved with:
+```
+checkprod ← { ⍝ layer-size checkprod img-string
+  layers ← ⍺ split ⍵
+  stats ← 100 3⍴∊{+/¨('0'=⍵)('1'=⍵)('2'=⍵)}¨layers
+  row ← (stats[;1]=⌊/stats[;1])⍳1
+  ×/stats[row;2 3]
+}
+```
+
+Which splits the input into layers of the desired size and collects a matrix of stats on them (the columns being the number of zeroes, ones, and twos and the rows being layers). The correct row is found by using the index of function `⍳` which returns the first index within the array on the left of the item on the right (or one more than the length of the array on the left if the item is not found). The rest of the function is obvious.
+
+## Part Two
+
+Part two will again use the `split` function. The first bit of real work is in flattening the layers:
+```
+flatten ← { ⍝ layer-size flatten img-string
+  layers ← (≢⍵)÷⍺
+  image ← layers ⍺⍴⍵
+  rows ← {1⍳⍨'2'≠image[;⍵]}¨⍳⍺
+  indices ← 2 split(rows,⍳⍺)[⍋(⍳⍺),⍳⍺]
+  image[indices]
+}
+```
+The input data is reshaped into a matrix where each row is a layer. For each column, the row of the first digit other than two is recorded in `rows`. The `⍨` operator is the commute / switch operator, which works like `flip` in Haskell, etc as it flips the two arguments (left becomes right and vice versa). This is merely for some cleaner code.
+
+The indices are calculated by splitting the interleaving of the found rows and the column indices; splitting them into two element arrays in a nested vector allows for the result to be picked out into a single vector (whereas if the indices were numerical arrays they would index into _entire_ rows or _entire_ columns). Note that flatten doesn't change the shape of the data to fit the given size of the image (6x25 in my input data) but just flattens layers as a single vector as each layer will have the same two dimensional positions represented by the same ordinal position in the layer's vector.
+
+With the ability to flatten an image, the following will decode the image into a readable representation:
+```
+decode ← { ⍝ (rows cols) decode input
+  rows ← 1⊃⍺
+  cols ← 2⊃⍺
+  flat ← (rows×cols)flatten input
+  disp ← '* '[1+'0'=flat]
+  rows cols⍴disp
+}
+```
+
+* [Day 8, Part 1](https://github.com/ummaycoc/aoc-2019.apl/blob/master/src/Day08/day8-part1.apl).
+* [Day 8, Part 2](https://github.com/ummaycoc/aoc-2019.apl/blob/master/src/Day08/day8-part2.apl).
+
+[This Day](#day-8) ◈ [Calendar](#december-2019) ◈ Next Day
 
 # Day 7
 ## Part One
@@ -169,7 +221,7 @@ maxamp ← { ⍝ maxamp program
 * [Day 7, Part 1](https://github.com/ummaycoc/aoc-2019.apl/blob/master/src/Day07/day7-part1.apl).
 * [Day 7, Part 2](https://github.com/ummaycoc/aoc-2019.apl/blob/master/src/Day07/day7-part2.apl).
 
-[This Day](#day-7) ◈ [Calendar](#december-2019) ◈ Next Day
+[This Day](#day-7) ◈ [Calendar](#december-2019) ◈ [Next Day](#day-8)
 
 # Day 6
 ## Part One
