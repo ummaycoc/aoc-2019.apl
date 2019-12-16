@@ -6,7 +6,7 @@
 ├─────────────────────────────────────────┤
 │  <a href="#day-1">1</a>  │  <a href="#day-2">2</a>  │  <a href="#day-3">3</a>  │  <a href="#day-4">4</a>  │  <a href="#day-5">5</a>  │  <a href="#day-6">6</a>  │  <a href="#day-7">7</a>  │
 ├─────────────────────────────────────────┤
-│  <a href="#day-8">8</a>  │  9  │ 10  │ 11  │ 12  │ 13  │ 14  │
+│  <a href="#day-8">8</a>  │  <a href="#day-9">9</a>  │ 10  │ 11  │ 12  │ 13  │ 14  │
 ├─────────────────────────────────────────┤
 │ 15  │ 16  │ 17  │ 18  │ 19  │ 20  │ 21  │
 ├─────────────────────────────────────────┤
@@ -27,6 +27,421 @@ input ← ¯1↓⊃read[1]
 The drop is usually useful in AoC as it removes the trailing newline from the data. If the data is already in the form of APL data (i.e. an array), then it can be executed with the hydrant symbol `⍎`.
 
 ---
+
+# Day 9
+## Preliminaries: Arbitrary Precision Arithmetic
+
+There are several user submitted arbitrary precision integer arithmetic libraries hosted on Dyalog's website; however, this is about learning more APL.
+
+The first step is to define some helper functions. The following function takes a lefthand boolean vector and a righthand content vector and removes the initial segment of the content vector corresponding to the initial segment of false values in the boolean vector. If all the content is removed, a one element zero vector is returned.
+```
+peel ← { ⍝ boolean-vec peel digits
+  nz ← ⍺⍳1
+  mask ← nz≤⍳≢⍵
+  d ← mask/⍵
+  d,(0=≢d)⍴0
+}
+```
+
+As an example use of the above, the below removes leading zeroes from a sequence of numbers:
+```
+trim ← { ⍝ trim digits: removes leading zeroes
+  (0≠⍵) peel ⍵
+}
+```
+and so `trim 0 0 0 1 2 3 0 0 0 0` will yield `1 2 3 0 0 0 0` while `trim ⍬` will yield just `0` as a vector as will `trim 0 0 0`.
+
+Addition and subtraction are easier to compute when both operands have the same length and the following function will pad two sequences of digits with leading zeroes to ensure that condition:
+```
+pad ← { ⍝ digits pad digits → (digits' digits')
+  max ← 1⌈(≢⍺)⌈(≢⍵)
+  {((max-≢⍵)⍴0),⍵}¨⍺ ⍵
+}
+```
+
+Strings form a decent representation for arbitrarily large integers but are more difficult to compute with, and so the following will convert from a string into a two element nested array: the first element is a scalar representing the sign of the number (either `¯1`, `0`, or `1`) and the second element is the vector of decimal digits that constitute the number.
+```
+parseNum ← { ⍝ parseNum string -> (sign, digits)
+  neg ← (⍵,'0')[1]∊'¯-'
+  num ← neg↓⍵
+  neg ← neg×0<≢num
+  d ← trim ⍎¨'0',num
+  s ← (d[1]≠0)×(1 ¯1)[1+neg]
+  s d
+}
+```
+
+The inverse of `parseNum` carries a parsed number back to a string representation:
+```
+fmt ← { ⍝ fmt num
+  sign digits ← ⍵
+  ⊃,/('¯' '' '')[2+sign],⍕¨digits
+}
+```
+
+And the ability to parse directly to a number can be useful, and this is given by `fmtInt ← { (1⊃⍵)×10⊥(2⊃⍵) }`.
+
+Two useful operators are `snum` and `fnum` below. `snum` will allow arithmetic to be performed on strings with non-string (i.e. parsed) results; `fnum` will allow performing arithmetic on strings with string results. Later, when `add`, `mul`, and `sub` are defined, these can be used as so: `'¯10' mul fnum '25'` which would result in the string `'¯250'`:
+```
+snum ← { (parseNum ⍺) ⍺⍺ (parseNum ⍵) }
+fnum ← { fmt (parseNum ⍺) ⍺⍺ (parseNum ⍵) }
+```
+
+Performing a carry on a number will be necessary for some operations--that is, if a number is represented as `1 (1 9 29 5 12)` it should be normalized to `1 (2 1 9 6 2)`:
+```
+carry ← { ⍝ carry num
+  carryon ← { ⍝ (c din dout) → (c' din' dout')
+    cin din dout ← ⍵
+    s ← cin+1↑din,0
+    d ← 10|s
+    cout ← (s-d)÷10
+    cout (1↓din) (dout,d)
+  }
+  sign digits ← ⍵
+  done ← {
+    cin din dout ← ⍺
+    0=cin⌈≢din
+  }
+  res ← (carryon⍣done) 0 (⌽digits) ⍬
+  sign (⌽3⊃res)
+}
+```
+
+Likewise, borrowing to balance out negatives in a digit sequence is needed to normalize a digit sequence after subtraction.
+```
+borrow ← { ⍝ borrow num-with-negs → num
+  brw ← { ⍝ brw din dout → brw' din' dout'
+    bin din dout ← ⍵
+    s ← (1⊃din)-bin
+    d ← 10|s
+    bout ← ¯10÷⍨s-d
+    bout (1↓din) (d,dout)
+  }
+  s d ← ⍵
+  s (trim 3⊃(brw⍣{0=≢2⊃⍺})0(⌽trim d)⍬)
+}
+```
+Of note is that the sign returned is independent of the result after borrowing because what the sign is should already be decided at this point. Additionally, the leading digit in the result should be positive as this is used to subtract a number of smaller magnitude from one of larger magnitude.
+
+Somewhat more basic than arithmetic is comparing numbers, and the below functions provide all the standard comparisons of parsed numbers. First equality and inequality are defined:
+```
+eq ← { ⍝ num eq num
+  ⍺[1]≠⍵[1]: 0
+  (≢2⊃⍺)≠(≢2⊃⍵): 0
+  ∧/⊃⍺[2]=⍵[2]
+}
+
+ne ← { ⍝ num ne num
+  ~⍺ eq ⍵
+}
+```
+The function `eq` uses some functionality not used in earlier solutions--the colon can be used for an early return when the value on the left is `1`, having the direct function result in the value on the right of the colon.
+
+Strict and non-strict inequalities can be defined purely in terms of one another, specifically only in terms of one such function, such as greater than:
+```
+gt ← { ⍝ num gt num
+  ls ld ← ⍺
+  rs rd ← ⍵
+  ld rd ← ld pad rd
+  ne ← ld≠rd
+  ld ← ne peel ld
+  rd ← ne peel rd
+  greater ← ld[1]>rd[1]
+  lesser ← ld[1]<rd[1]
+  pos ← ∧/1=ls rs
+  neg ← ∧/¯1=ls rs
+  (ls>rs) ∨ (pos∧greater) ∨ (neg∧lesser)
+}
+
+ge ← { ⍝ num ge num
+  ~⍵ gt ⍺
+}
+
+lt ← { ⍝ num lt num
+  ⍵ gt ⍺
+}
+
+le ← { ⍝ num le num
+  ~⍺ gt ⍵
+}
+```
+
+Sign manipulations can be important and the below provide the absolute value and negation of parsed numbers:
+```
+abs ← { ⍝ abs num
+  s d ← ⍵
+  (|s) d
+}
+
+neg ← { ⍝ num → neg of num
+  s d ← ⍵
+  (¯1×s) d
+}
+```
+
+Finally, subtraction, addition, and multiplication can be defined as:
+```
+sub ← { ⍝ a sub b → a-b
+  ⍺ eq ⍵: 0(1⍴0)
+  (abs ⍺) eq (abs ⍵): carry (⍺[1]) (2×2⊃⍺)
+  lbig ← (abs ⍺) gt (abs ⍵)
+  bs bd ← (1+lbig)⊃⍵ ⍺
+  ss sd ← (1+~lbig)⊃⍵ ⍺
+  bd sd ← bd pad sd
+  sign ← bs×(¯1 1)[1+lbig]
+  fs fd ← borrow sign (bd-sd)
+  fs (trim fd)
+}
+
+add ← { ⍝ num add num
+  ls ld ← ⍺
+  rs rd ← ⍵
+  ∧/0=ls rs: 0(1⍴0)
+  0=ls×rs: (1+0=ls)⊃⍺ ⍵
+  ls=rs: carry ls(⊃+/ld pad rd)
+  ⍝ One of ls and rs is 1 and the other ¯1
+  ls<0: ⍵ sub(abs ⍺)
+  ⍺ sub(abs ⍵)
+}
+
+mul ← { ⍝ num mul num → num
+  lbig ← (abs ⍺)ge(abs ⍵)
+  bs bd ← (1+lbig)⊃(⍵ ⍺)
+  ss sd ← (1+~lbig)⊃(⍵ ⍺)
+  lz ← ¯1+⍳≢sd
+  rz ← ⌽lz
+  row ← {(lz[⍵]⍴0),(sd[⍵]×bd),(rz[⍵]⍴0)}
+  carry (bs×ss) (trim+⌿↑row¨⍳≢sd)
+}
+```
+
+## Part One
+
+The following function will parse a program in the form given by the Advent of Code, changing negative signs to high minus negative signs (for APL literals), splitting the result by commas:
+```
+parseProgram←{ ⍝ parseProgram programString
+  idx ← (⍵='-')/⍳≢⍵
+  prg ← ⍵
+  prg[idx] ← ('¯'⍬)[1+0=≢idx]
+  (prg≠',')⊆prg
+}
+```
+Note that the values are left as strings and not interpreted as integers--since the problem states that numbers can be large, it makes sense to use string representations in order to utilize the large integer arithmetic functions from the preliminaries section.
+
+Since values stored in intcode memory are now strings instead of integers, it makes sense to have a function to parse the opcode at any given position, returning the raw opcode along with the parameter modes:
+```
+parseCode ← { ⍝ state parseCode pc
+  opcode ← ⍎⌽5↑⌽(1+⍵)⊃⍺
+  parsed ← 10 10 10 100⊤opcode
+  modes ← ⌽1+3↑parsed
+  code ← ⊃¯1↑parsed
+  code modes
+}
+```
+
+Using `parseCode` and the veritable `split` function `split ← {(0=⍺|¯1+⍳≢⍵)⊂⍵}` operations can now be parsed, just as in previous problems:
+```
+parseOp ← { ⍝ state parseOp (counter, base) → code (input addrs) (output addrs)
+  pc base ← ⍵
+  base ← ⍕base
+  code modes ← ⍺ parseCode pc
+  imm ← pc+⍳3
+  pos ← (⍺,3⍴(⊂1⍴'0'))[1+imm]
+  rel ← {base add fnum ⍵}¨pos
+  idx ← (modes,⍳3)[⍋(⍳3),⍳3]
+  addrs ← ⍎¨(↑pos (⍕¨imm) rel)[2 split idx]
+  nin ← (2 2 0 1 2 2 2 2 1)[code]
+  nout ← (1 1 1 0 0 0 1 1 0)[code]
+  ins ← nin↑addrs
+  addrs ← nin↓addrs
+  outs ← nout↑addrs
+  code ins outs
+}
+```
+
+The changes here versus earlier versions involve both the string representation and relative addressing mode. The `↑` operator is now used to combine the rows of a matrix into a matrix (as this is what it does without a lefthand argument). Additionally, the code (as given by `parseCode`) is now a raw scalar instead of something to be picked out later via `⊃` or indexing.
+
+The following helper functions assist the new `step` function and ensure that it is written in a manner independent of instruction representation (i.e. strings v. integers):
+```
+expand ← { ⍝ state expand mems
+  max ← ⌈/⍵
+  ⍺,(0⌈1+max-≢⍺)⍴⊂1⍴'0'
+}
+
+advance ← { ⍝ code res advance pc base inputs outputs
+  z ← ⊂1⍴'0'
+  code res ← ⍺
+  p b ins outs ← ⍵
+  next ← p+1+≢ins,outs
+  jump ← ⍎2⊃ins,z,z
+  zero ← (1⍴'0')≡1⊃ins,z
+  jnz ← (next jump)[1+~zero]
+  jz ← (next jump)[1+zero]
+  p ← (next jnz jz)[1+(code∊5 6)+(code=6)]
+  b ← b+((⍎res)×code=9)
+  p b
+}
+
+compute ← { ⍝ code compute (values, inputs)
+  z ← 1⍴'0'
+  v i ← ⍵
+  ⍺=3: 1⊃i,⊂z
+  ⍺∊4 5 6: z
+  ⍺=9: 1⊃v
+  l r ← v
+  ⍺=1: l add fnum r
+  ⍺=2: l mul fnum r
+  ⍺=7: ⍕l lt snum r
+  ⍺=8: ⍕l eq snum r
+}
+```
+
+The `expand` function will add zeroed out memory to the program to account for addresses that would otherwise be out of bounds. The `advance` function takes a raw code, a result, the inputs and outputs of the current command, and maps the program counter and relative base to new values. Finally, the `compute` function takes an instruction code, operands, and the input stream and returns the computed result of the desired operation, with `'0'` being the default for expressionless statements.
+
+The bulk of the work comes again in the form of a `step` function that performs a single operation in the intcode computer:
+```
+step ← { ⍝ step (program-counter base state input output)
+  p b s i o ← ⍵
+  parsed ← s parseOp(p b) ⍝ has code (input addrs) (output addrs)
+  code ← parsed[1]
+  s ← s expand∊parsed[2 3]
+  ins ← s[1+⊃parsed[2]]
+  outs ← 1+⊃parsed[3]
+  output ← o,code⊃(⍬ ⍬ ⍬ ins ⍬ ⍬ ⍬ ⍬ ⍬)
+  res ← code compute(ins i)
+  p b ← code res advance p b ins outs
+  s[outs] ← (⍬ res)[1+0<≢outs]
+  i ← (code=3)↓i
+  p b s i output
+}
+```
+Everything here is a rather straightforward application of earlier work. Some lines are simplified or condensed versions of previous implementations (such as `s[outs] ← (⍬ res)[1+0<≢outs]`) but the spirit and effects are still the same.
+
+Finally, bringing it all together is the `run` function:
+```
+run ← { ⍝ input-stream run program
+  test ← {
+    pc state ← ⍺[1 3]
+    code ← ⊃state parseCode pc
+    ~code∊1 2 3 4 5 6 7 8 9
+  }
+  program ← ⍵
+  input ← ⍺
+  output ← ⍬
+  step⍣test 0 0 program input output
+}
+```
+which can be run with the likes of:
+```
+⊃⌽ (⊂1⍴'1') run program
+```
+if one would desire an input of just the number `1`.
+
+### Dropping String Representations
+
+One inefficiency of the above is that numbers are repeatedly converted back and forth between their string representations. The intcode computer doesn't really care _how_ values are represented, only that they are represented. Thus, keeping numbers in their parsed form will improve performance.
+
+The first step is to define some constants, `PZ` and `PO` for parsed zero and parsed one, which shall be used in several places later.
+```
+PZ ← parseNum '0'
+PO ← parseNum '1'
+```
+
+The only change to parsing a program is to parse all the numbers at once at the start:
+```
+parseProgram ← { ⍝ parseProgram programString
+  idx ← (⍵='-')/⍳≢⍵
+  prg ← ⍵
+  prg[idx] ← ('¯'⍬)[1+0=≢idx]
+  parseNum¨(prg≠',')⊆prg
+}
+```
+
+Parsing an opcode becomes even more trivial since all the digits are available:
+```
+parseCode ← { ⍝ state parseCode pc
+  m3 m2 m1 c10 c1 ← ⌽5↑⌽(5⍴0),2⊃(1+⍵)⊃⍺
+  (c1+c10×10) (1+m1 m2 m3)
+}
+```
+
+The changes to `parseOp` are a bit more significant but these are mainly ergonomic in that they made the overall changes simpler:
+```
+parseOp ← { ⍝ state parseOp (counter, base) → code (input addrs) (output addrs)
+  pc base ← ⍵
+  code modes ← ⍺ parseCode pc
+  nin ← (2 2 0 1 2 2 2 2 1)[code]
+  nout ← (1 1 1 0 0 0 1 1 0)[code]
+  nt ← nin+nout
+  modes ← modes[⍳nt]
+  imm ← pc+⍳nt
+  pos ← (⍺,3⍴⊂PZ)[1+imm]
+  rel ← {base add ⍵}¨pos
+  imm ← {carry 1 (1⍴⍵)}¨imm
+  idx ← (modes,⍳nt)[⍋(⍳nt),⍳nt]
+  addrs ← (↑pos imm rel)[2 split idx]
+  addrs ← {10⊥2⊃⍵}¨addrs,⊂PZ ⍝ Ensures a vector
+  ins ← nin↑addrs
+  addrs ← nin↓addrs
+  outs ← nout↑addrs
+  code ins outs
+}
+```
+The primary difference is that the number of addresses used is precalculated and used early on; also the `base` is in parsed form.
+
+The uptack `⊥` can be used to encode a number given a base, so that `2⊥1 0 1` is `5`. Given that, the changes to `expand`, `advance`, and `compute` should be self-explanatory:
+```
+expand ← { ⍝ state expand mems
+  max ← ⌈/⍵
+  ⍺,(0⌈1+max-≢⍺)⍴⊂PZ
+}
+
+advance ← { ⍝ code res advance pc base inputs outputs
+  code res ← ⍺
+  p b ins outs ← ⍵
+  next ← p+1+≢ins,outs
+  jump ← 10⊥2⊃2⊃ins,(⊂PZ),(⊂PZ)
+  zero ← 0=10⊥2⊃1⊃ins,(⊂PZ)
+  jnz ← (next jump)[1+~zero]
+  jz ← (next jump)[1+zero]
+  p ← (next jnz jz)[1+(code∊5 6)+(code=6)]
+  9≠code: p b
+  p (b add res)
+}
+
+compute ← { ⍝ code compute (values, inputs)
+  v i ← ⍵
+  ⍺=3: 1⊃i,⊂PZ
+  ⍺∊4 5 6: PZ
+  ⍺=9: 1⊃v
+  l r ← v
+  ⍺=1: l add r
+  ⍺=2: l mul r
+  ⍺=7: (1+l lt r)⊃(PZ PO)
+  ⍺=8: (1+l eq r)⊃(PZ PO)
+}
+```
+
+There are no changes to `step` and the only change to `run` is to pass `PZ` for the initial base:
+```
+step⍣test 0 PZ program input output
+```
+
+Running a program and fetching its output can be done with:
+```
+fmt¨⊃⌽(⊂parseNum '1') run program
+```
+which will run with a single input of `1`.
+
+## Part Two
+
+Part two is just a reapplication of part one.
+
+* [Day 9, Preliminaries](https://github.com/ummaycoc/aoc-2019.apl/blob/master/src/Day09/arith.apl).
+* [Day 9, Part 1](https://github.com/ummaycoc/aoc-2019.apl/blob/master/src/Day09/day9-part1.apl) (using string representation).
+* [Day 9, Part 1](https://github.com/ummaycoc/aoc-2019.apl/blob/master/src/Day09/day9-part1-num.apl) (using parsed representation).
+
+[This Day](#day-9) ◈ [Calendar](#december-2019) ◈ Next Day
 
 # Day 8
 ## Part One
@@ -78,7 +493,7 @@ decode ← { ⍝ (rows cols) decode input
 * [Day 8, Part 1](https://github.com/ummaycoc/aoc-2019.apl/blob/master/src/Day08/day8-part1.apl).
 * [Day 8, Part 2](https://github.com/ummaycoc/aoc-2019.apl/blob/master/src/Day08/day8-part2.apl).
 
-[This Day](#day-8) ◈ [Calendar](#december-2019) ◈ Next Day
+[This Day](#day-8) ◈ [Calendar](#december-2019) ◈ [Next Day](#day-9)
 
 # Day 7
 ## Part One
