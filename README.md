@@ -6,7 +6,7 @@
 ├─────────────────────────────────────────┤
 │  <a href="#day-1">1</a>  │  <a href="#day-2">2</a>  │  <a href="#day-3">3</a>  │  <a href="#day-4">4</a>  │  <a href="#day-5">5</a>  │  <a href="#day-6">6</a>  │  <a href="#day-7">7</a>  │
 ├─────────────────────────────────────────┤
-│  <a href="#day-8">8</a>  │  <a href="#day-9">9</a>  │ 10  │ 11  │ 12  │ 13  │ 14  │
+│  <a href="#day-8">8</a>  │  <a href="#day-9">9</a>  │ <a href="#day-10">10</a>  │ 11  │ 12  │ 13  │ 14  │
 ├─────────────────────────────────────────┤
 │ 15  │ 16  │ 17  │ 18  │ 19  │ 20  │ 21  │
 ├─────────────────────────────────────────┤
@@ -27,6 +27,92 @@ input ← ¯1↓⊃read[1]
 The drop is usually useful in AoC as it removes the trailing newline from the data. If the data is already in the form of APL data (i.e. an array), then it can be executed with the hydrant symbol `⍎`.
 
 ---
+
+# Day 10
+## Part One
+
+Parsing a map can be done with the following, assuming that the newline is a single line feed: `parseMap ← { '#'=↑⍵⊆⍨~⍵=⎕UCS 10 }`. This splits the string into a list of non-linefeed characters with the partition function `⊆` (commuted with `⍨`). `↑` will take a list of rows and form a matrix (this is called _mix_ when used on one argument and _take_ when used with two). Searching this matrix for `'#'` with `=` yields a boolean matrix denoting where asteroids are.
+
+Given the boolean matrix of asteroid locations, the indices can be found with compression (`/`). The vector to compress will be found with the index function `⍳` and the shape function `⍴`: `⍳⍴` will create a list of indices for its righthand argument, be it a vector or a matrix. Using this and `,` to unravel matrices into vectors `asteroids ← { (,⍵)/,⍳⍴⍵ }` will give a list of asteroid coordinates. Note that these are one-relative row/column coordinates, which is not compatible with the coordinate system in the problem, but that is irrelevant for this part.
+
+Division in APL is given by `÷` so that `4÷2` is `2` and `2÷4` is `0.5`. By default in Dyalog, division by zero is an error except that `0÷0` is `1`. If you set `⎕DIV` to `1` then division by zero is `0` ubiquitously. The logical or symbol `∨` can be used for forming a disjunction of boolean values but it also calculates the GCD of its operands--`30 ∨ 42` yields `6`--and it yields the positive GCD even when given negative arguments. If one argument is `0` then the the absolute value of the other is returned.
+
+With the above knowledge, fractions can be transformed into their lowest terms with `dirs ← { {⍵÷∨/⍵}¨⍵ }`--here called `dirs` since they will represent directions. As long as `dirs`is not given the origin there will be no division by zero (but if there was, it wouldn't be an error as it would be `0÷0`).
+
+Coordinates can be translated to recenter the origin with `center ← { pt ← ⍺ ⋄ {⍵-pt}¨⍵ }`; `⋄` is the statement separator, it's use is just like if its arguments had been on two lines.
+
+Using the above, part one can be found with:
+```
+countDirs ← { ⍝ countDirs asteroids
+  step ← { ⍝ step counts done todo
+    c d t ← ⍵
+    p ← 1⊃t
+    t ← 1↓t
+    qty ← ≢∪dirs p center d,t
+    (c,qty) (d,⊂p) t
+  }
+  (step⍣{0=≢⊃⌽⍺}) ⍬ ⍬ ⍵
+}
+
+find ← { ⌈/1⊃countDirs asteroids parseMap ⍵ }
+```
+
+`countDirs` counts, for each asteroid, how many other asteroids are in a direct line of site by counting how many _unique_ directions are found relative to the currently considered asteroid. The step function iterates over the list of asteroids given to `countDirs`, moving asteroids from a todo list to a done list.
+
+At any given execution of `step`, an asteroid is peeled off the todo list, the positions of the other asteroids are calculated with that asteroid at the origin, and their directions from that position are calculated and then uniqued by the `∪` function. The iteration is handled by the power operator `⍣` and continues until all asteroids are considered.
+
+`find` just calculates the maximum count found in the iteration of `step`.
+
+## Part Two
+
+Part two will reuse almost all of part one except `find` will not be needed and `asteroids` must be changed to use a different coordinate system: `asteroids ← { (,⍵)/,⌽¨⊖¯1+⍳⍴⍵ }` gives asteroid positions using the standard cartesian coordinate system (i.e. the lower left corner will be the origin).
+
+A key step to part two is to partition a list of points (not including the origin) by their clockwise angle from the positive vertical axis. Wrapping use of the key operator `⌸` inside a new operator `skey ← { idx ← ⍋⍵ ⋄ ⍵[idx] ⍺⍺ ⌸ ⍺[idx] }` will allow us to do just that. Here the sort order of the righthand argument is stored in `idx` and as above `⋄` separates two statements. The sorted righthand values are used as the keys mapping to righthand values (which are sorted using the same permutation for obvious reasons). For generality purposes, the mapping to key/value pairs is left generic with `⍺⍺`.
+
+Now builing up to the use of `skey`, define:
+* `complex ← { ⍵[1] + 0J1×⍵[2] }` which will map a two element vector to a complex number as `0J1` is the complex unit;
+* `flip ← { (-9○⍵) + (0J1×11○⍵) }` uses the circle function `○` which performs different mathematical functions depending on its lefthand argument; note that it's lefthand argument is positive 9, the `-` will negate the result (negative nine would be `¯9` not `-9`). `9○` yields the real part of a complex number whereas `11○` yields the imaginary part and so `flip` merely negates the real part of a complex number;
+* `rot ← { 0J1×⍵ }` multiplies a number by the complex unit and so rotates a number 90° counter clockwise;
+* `degrees ← { 360|(180÷○1)×12○⍵ }` calculates the counter clockwise degrees from the positive horizontal axis of a complex point (`12○` gives the _phase_ or _argument_ of a complex value);
+* `dist ← { 0.5*⍨+/⍵*2 }` calculates the distance of a point (not a complex number) from the origin;
+* `sort ← { ⍵[⍋dist¨⍵] }` will sort a list of points by their distance to the origin.
+
+With the above, `skey` can be used as follows:
+```
+group ← { ⍵ {⍺ ⍵} skey degrees flip rot complex¨dirs ⍵ }
+```
+which, given a list of points in the cartesian plane uses `dirs` from part one to convert them into normalized directions and converts them into complex numbers. The use of `rot` and `flip` are used to make degrees measure positively from the positive vertical axis in a clockwise manner, and `degrees` calculates these values. Thus, `group` will group points based on their clockwise angle from the positive vertical axis.
+
+Given a list of lists of items, `merge ← { (⊃,/⍵)[⍋⊃,/⍳¨≢¨⍵] }` will combine them in a manner that will take, in order, the first elements of each of the lists, then the second, and so on, so that the result is the interleaving of lists even if they are not of the same length. Thus, if the lists have `1 2 3`, `4 5`, and `6 7 8` then the result would be `1 4 6 2 5 7 3 8` (i.e. it sorts them like customers waiting for cashiers at Whole Foods / Trader Joe's).
+
+One final piece is the following which translates coordinates from a cartesian plane (with the normal positive directions) to APL matrix indices so that if the origin is at the bottom left of a n row by m column map then the origin gets mapped to the index (n-1) 1.
+```
+translate ← {
+  m p ← ⍺
+  c ← (⍴m)[2]
+  { (c-p[2]+⍵[2]), (p[1]+1+⍵[1]) }¨⍵
+}
+```
+
+The following function combines all of the above to find the solution:
+```
+laser ← { ⍝ laser map
+  counts points ← (countDirs asteroids ⍵)[1 2]
+  idx ← counts⍳⌈/counts
+  pos ← idx⊃points
+  others ← (idx≠⍳≢points)/points
+  grouped ← group sort pos center others
+  ⍵ pos translate merge grouped[;2]
+}
+```
+Finding the asteroid to start shooting from, other asteroids are grouped by angle but internally sorted by distance from the laser (this is because sorting in Dyalog is stable--a fact used whenever interleaving lists). These groupings are then flattened together and translated back to APL indices (i.e. indices into the actual map).
+
+Taking the result of the above and mapping it to the coordinates of the problem and using `⊥` to encode the result in decimal, `last ← { 100 ⊥ ⌽¯1 + ⍺ ⊃ laser parseMap ⍵ }` will take a number on the left and an unparsed map on the right and yield the desired result (the number being which asteroid to stop on--in the problem, number 200).
+
+* [Day 10, Part 1](https://github.com/ummaycoc/aoc-2019.apl/blob/master/src/Day10/day10-part1.apl).
+* [Day 10, Part 2](https://github.com/ummaycoc/aoc-2019.apl/blob/master/src/Day10/day10-part2.apl).
+
+[This Day](#day-10) ◈ [Calendar](#december-2019) ◈ Next Day
 
 # Day 9
 ## Preliminaries: Arbitrary Precision Arithmetic
@@ -441,7 +527,7 @@ Part two is just a reapplication of part one.
 * [Day 9, Part 1](https://github.com/ummaycoc/aoc-2019.apl/blob/master/src/Day09/day9-part1.apl) (using string representation).
 * [Day 9, Part 1](https://github.com/ummaycoc/aoc-2019.apl/blob/master/src/Day09/day9-part1-num.apl) (using parsed representation).
 
-[This Day](#day-9) ◈ [Calendar](#december-2019) ◈ Next Day
+[This Day](#day-9) ◈ [Calendar](#december-2019) ◈ [Next Day](#day-10)
 
 # Day 8
 ## Part One
