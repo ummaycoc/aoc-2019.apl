@@ -6,7 +6,7 @@
 ├─────────────────────────────────────────┤
 │  <a href="#day-1">1</a>  │  <a href="#day-2">2</a>  │  <a href="#day-3">3</a>  │  <a href="#day-4">4</a>  │  <a href="#day-5">5</a>  │  <a href="#day-6">6</a>  │  <a href="#day-7">7</a>  │
 ├─────────────────────────────────────────┤
-│  <a href="#day-8">8</a>  │  <a href="#day-9">9</a>  │ <a href="#day-10">10</a>  │ 11  │ 12  │ 13  │ 14  │
+│  <a href="#day-8">8</a>  │  <a href="#day-9">9</a>  │ <a href="#day-10">10</a>  │ <a href="#day-11">11</a>  │ 12  │ 13  │ 14  │
 ├─────────────────────────────────────────┤
 │ 15  │ 16  │ 17  │ 18  │ 19  │ 20  │ 21  │
 ├─────────────────────────────────────────┤
@@ -27,6 +27,100 @@ input ← ¯1↓⊃read[1]
 The drop is usually useful in AoC as it removes the trailing newline from the data. If the data is already in the form of APL data (i.e. an array), then it can be executed with the hydrant symbol `⍎`.
 
 ---
+
+# Day 11
+## Part One
+
+Of course the first step is to use the intcode computer from day 9. However, the run function should be changed to halt on IO by not including `3` or `4` in the opcodes it accepts:
+```
+run ← { ⍝ (pc base) run program
+  test ← {
+    pc state ← ⍺[1 3]
+    code ← ⊃state parseCode pc
+    ~code∊1 2 5 6 7 8 9
+  }
+  pc base ← ⍺
+  step⍣test pc base ⍵ ⍬ ⍬
+}
+```
+
+The next few functions all accept the same arguments on the right: a program counter, the relative base, the program state, a sequential list of squares visited, a vector of squares that are currently painted white, current facing direction, and a list of unconsumed outputs.
+
+When input is requested, the computer can determine the input dynamically and feed it into the `step` function:
+```
+writeInput ← { ⍝ writeInput pc base state squares white-squares dir outputs
+  p b s sq w d o ← ⍵
+  isw ← (1⊃sq)∊w
+  i ← (PZ PO)[1+isw]
+  p b s ← (step p b s i ⍬)[1 2 3]
+  p b s sq w d o
+}
+```
+
+When output is about to be produced, it can either be consumed or held for later consumption. Note that the direction and position are represented as complex numbers:
+```
+readOutput ← { ⍝ readOutput pc base state squares white-squares dir outputs
+  p b s sq w d o ← ⍵
+  p b s oo ← (step p b s ⍬ ⍬)[1 2 3 5]
+  o ,← fmtInt¨oo
+  2>≢o: p b s sq w d o
+  c t ← o
+  d ×← (0J1 0J¯1)[1+t]
+  pos ← 1⊃sq
+  w ← (w≠pos)/w
+  w ,← (c+1)⊃(⍬ (1⍴pos))
+  pos +← d
+  p b s (pos, sq) w d ⍬
+}
+```
+There is some new functionality here. On the third line of the body, `,← ` is used. This is similar to compound assignment in Java, etc (i.e. `+=`, `-=`, `%=`, etc), `o` will be updated to `o,fmtInt¨oo`. `w` is updated similarly later, and `d` and `pos` are updated with compound arithmetic assignments. Note that the only condition checked is that `o` has less than two elements after updating, in which case the output is stored for later processing. Otherwise it is consumed, and since this will always be the case, there is no need to worry that `o` has _more_ than two elements.
+
+Bringing all of the above together, the following will execute one iteration of robot activity faithfully (either perform IO or run until halting or requesting IO):
+```
+robotStep ← { ⍝ robotStep pc base state squares white-squares dir outputs
+  p b s sq w d o ← ⍵
+  code ← ⊃s parseCode p
+  3=code: writeInput ⍵
+  4=code: readOutput ⍵
+  p b s ← (p b run s)[1 2 3]
+  p b s sq w d o
+}
+```
+
+Now that individual steps can be handled, the power operator can be used to find the final state:
+```
+robot ← { ⍝ robot program → squares
+  test ← {
+    pc state ← ⍺[1 3]
+    code ← ⊃state parseCode pc
+    ~code∊⍳9
+  }
+  ⍝ robotStep pc base state squares white-squares dir outputs
+  (robotStep⍣test) 0 PZ ⍵ (1⍴0) ⍬ 0J1 ⍬
+}
+```
+
+Finally, running a robot with a given program, picking out the vector of squares, dropping the last one (as it was not painted), and applying the unique function `∪` will yield a vector to count: `painted ← { ≢∪¯1↓4⊃robot ⍵ }`.
+
+## Part Two
+
+Part two is very similar to part one; the only change in the `robot` function is accepting an initial set of white squares as a lefthand argument. This changes the final line of robot to be `(robotStep⍣test) 0 PZ ⍵ (1⍴0) ⍺ 0J1 ⍬`.
+
+As squares are stored as complex numbers, a preliminary step is to change a vector of complex numbers into a nested array of indices into a matrix (for painting purposes):
+```
+points ← { ⍝ points white-spaces
+  w ← ⍵-(¯1+⌊/9○⍵)+(¯1+⌊/11○⍵)×0J1
+  ⊖(⍳ (⌈/11○w) (⌈/9○w))∊↓[1]↑(11○w)(9○w)
+}
+```
+The first line shifts the vector so that it's smallest real part is `1` and it's smallest imaginary part is `1` (and thus the values will form valid indices). The second line creates the smallest matrix of indices (via `⍳ (⌈/11○w) (⌈/9○w)`) that includes _all_ of the shifted values. This matrix of indices is turned into a boolean matrix by testing whether the indices are any of the shifted values, and this boolean matrix is reflected by rows (i.e. the first and last rows exchange, etc) by application of `⊖`.
+
+Finally, the robot can paint the registration identifier with `{ ' *'[1+points 5⊃⍺ robot ⍵] }` which runs a program, picks out the white squares, converts them into points in a matrix, and then uses that to index into a character vector (and so will display the result).
+
+* [Day 11, Part 1](https://github.com/ummaycoc/aoc-2019.apl/blob/master/src/Day11/day11-part1.apl).
+* [Day 11, Part 2](https://github.com/ummaycoc/aoc-2019.apl/blob/master/src/Day11/day11-part2.apl).
+
+[This Day](#day-11) ◈ [Calendar](#december-2019) ◈ Next Day
 
 # Day 10
 ## Part One
@@ -112,7 +206,7 @@ Taking the result of the above and mapping it to the coordinates of the problem 
 * [Day 10, Part 1](https://github.com/ummaycoc/aoc-2019.apl/blob/master/src/Day10/day10-part1.apl).
 * [Day 10, Part 2](https://github.com/ummaycoc/aoc-2019.apl/blob/master/src/Day10/day10-part2.apl).
 
-[This Day](#day-10) ◈ [Calendar](#december-2019) ◈ Next Day
+[This Day](#day-10) ◈ [Calendar](#december-2019) ◈ [Next Day](#day-11)
 
 # Day 9
 ## Preliminaries: Arbitrary Precision Arithmetic
