@@ -6,7 +6,7 @@
 ├─────────────────────────────────────────┤
 │  <a href="#day-1">1</a>  │  <a href="#day-2">2</a>  │  <a href="#day-3">3</a>  │  <a href="#day-4">4</a>  │  <a href="#day-5">5</a>  │  <a href="#day-6">6</a>  │  <a href="#day-7">7</a>  │
 ├─────────────────────────────────────────┤
-│  <a href="#day-8">8</a>  │  <a href="#day-9">9</a>  │ <a href="#day-10">10</a>  │ <a href="#day-11">11</a>  │ <a href="#day-12">12</a>  │ 13  │ 14  │
+│  <a href="#day-8">8</a>  │  <a href="#day-9">9</a>  │ <a href="#day-10">10</a>  │ <a href="#day-11">11</a>  │ <a href="#day-12">12</a>  │ <a href="#day-13">13</a>  │ 14  │
 ├─────────────────────────────────────────┤
 │ 15  │ 16  │ 17  │ 18  │ 19  │ 20  │ 21  │
 ├─────────────────────────────────────────┤
@@ -27,6 +27,93 @@ input ← ¯1↓⊃read[1]
 The drop is usually useful in AoC as it removes the trailing newline from the data. If the data is already in the form of APL data (i.e. an array), then it can be executed with the hydrant symbol `⍎`.
 
 ---
+
+# Day 13
+## Part One
+
+Part one can be solved easily with the following three functions, together with the intcode computer from Day 9:
+```
+tiles ← { (0=3|⍳≢⍵)/⍵ }
+blocks ← { +/2=tiles ⍵ }
+count ← { blocks fmtInt¨5⊃⍬ run parseProgram ⍵ }
+```
+
+## Part Two
+
+The solution to Day 11 required an intcode computer that had to react to input and output in a more dynamic manner than earlier uses. Part two of today's problem also requires that, and so it would be beneficial to factor this capability. Using the intcode computer's `step` function from before:
+```
+intcode ← {
+  ⍝ (program) (onInput intcode onOutput) (initial-state) → (pc base program) (final-state)
+  ⍝ pc base program onInput state → input' state'
+  ⍝   is executed _before_ step, of course
+  ⍝ pc base program onOutput (state output) → state'
+  ⍝   is executed _after_ step, of course
+  getCode ← { ⊃(3⊃⍵) parseCode (1⊃⍵) }
+  notIO ← { ~(getCode ⍺)∊(⍳9)~3 4 }
+  notHalt ← { ~(getCode 1⊃⍺)∊⍳9 }
+  processIn ← ⍺⍺
+  processOut ← ⍵⍵
+  onInput ← { ⍝ (pc base program) (callback onInput) (state) → (pc base program) (state)
+    input state ← ⍺ processIn ⍵
+    (step (⍺,(⊂input)⍬))[1 2 3] state
+  }
+  onOutput ← { ⍝ (pc base program) (callback onOutput) (state) → (pc base program) (state)
+    res ← step (⍺,⍬ ⍬)
+    state ← (res[1 2 3]) processOut (⍵ (5⊃res))
+    (res[1 2 3]) state
+  }
+  exec ← { ⍝ exec (pc base program) (state)
+    intstate state ← ⍵
+    code ← ⊃(3⊃intstate) parseCode (1⊃intstate)
+    3=code: intstate onInput state
+    4=code: intstate onOutput state
+    ((step⍣notIO) intstate,⍬ ⍬)[1 2 3] state
+  }
+  (exec⍣notHalt) (0 PZ ⍺) ⍵
+}
+```
+This operator takes a lefthand function to respond to input requests and a righthand function to respond to output production. The input function must take the computer state on the left and the program-specific state on the right and produce an input and a new program-specific state; likewise the output function must accept the computer state on the left and the program-specific state and an output on the right and produce a new program-specific state. Any changes to the computer state will be ignored, and neither should invoke the `step` function as this will be handled by the operator. The `notIO` function uses `~`, the without function which returns the values on the left but without the values on the right.
+
+Using this operator, the problem can be solved with the functions below. The internal program state will be which positions have a block (used for debugging purposes), the position of the ball, the position of the paddle, unconsumed output, and the current score.
+
+```
+ioIn ← { ⍝ (pc base program) ioIn (blocks ball paddle output score)
+  bx px ← 9○⍵[2 3]
+  (parseNum ⍕ (-bx<px)+(bx>px)) ⍵
+}
+```
+This will respond to requests for IO by examining the horizontal location of the ball and the paddle and moving the paddle towards the ball.
+
+```
+ioOut ← { ⍝ (pc base program) ioOut (state output)
+  (blocks ball paddle outs score) new ← ⍵
+  outs ,← fmtInt¨new
+  3>≢outs: blocks ball paddle outs score
+  x y tile←outs
+  pos←x+y×0J1
+  pos=¯1: blocks ball paddle ⍬ tile
+  1=tile: blocks ball paddle ⍬ score
+  2=tile: (∪blocks,pos) ball paddle ⍬ score
+  3=tile: blocks ball pos ⍬ score
+  4=tile: blocks pos paddle ⍬ score
+  (blocks~pos) ball paddle ⍬ score
+}
+```
+This function responds to output as appropriately for each triple consumed (and storing the outputs for later use when there are less than three available). Note that positions are stored as complex values for ease of use.
+
+```
+run ← { ⍝ run program-string
+  program ← parseProgram program
+  program[1] ← ⊂parseNum'2'
+  2 5⊃program (ioIn intcode ioOut) ⍬ ¯1J¯1 ¯1J¯1 ⍬ 0
+}
+```
+The `run` function executes the program by first "inserting" two quarters and then running the program with the `intcode` operator; the final score is returned using the pick function `⊃`. Given that there are two elements on the left, the value returned will be the fifth element of the second element returned (so first pick the second element, then pick the fifth element of _that_).
+
+* [Day 13, Part 1](https://github.com/ummaycoc/aoc-2019.apl/blob/master/src/Day13/day13-part1.apl).
+* [Day 13, Part 2](https://github.com/ummaycoc/aoc-2019.apl/blob/master/src/Day13/day13-part2.apl).
+
+[This Day](#day-13) ◈ [Calendar](#december-2019) ◈ Next Day
 
 # Day 12
 ## Part One
@@ -96,7 +183,7 @@ And the least common multiple of all the moons in a system can be found with `si
 * [Day 12, Part 1](https://github.com/ummaycoc/aoc-2019.apl/blob/master/src/Day12/day12-part1.apl).
 * [Day 12, Part 2](https://github.com/ummaycoc/aoc-2019.apl/blob/master/src/Day12/day12-part2.apl).
 
-[This Day](#day-12) ◈ [Calendar](#december-2019) ◈ Next Day
+[This Day](#day-12) ◈ [Calendar](#december-2019) ◈ [Next Day](#day-13)
 
 # Day 11
 ## Part One
