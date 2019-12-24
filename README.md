@@ -6,7 +6,7 @@
 ├─────────────────────────────────────────┤
 │  <a href="#day-1">1</a>  │  <a href="#day-2">2</a>  │  <a href="#day-3">3</a>  │  <a href="#day-4">4</a>  │  <a href="#day-5">5</a>  │  <a href="#day-6">6</a>  │  <a href="#day-7">7</a>  │
 ├─────────────────────────────────────────┤
-│  <a href="#day-8">8</a>  │  <a href="#day-9">9</a>  │ <a href="#day-10">10</a>  │ <a href="#day-11">11</a>  │ 12  │ 13  │ 14  │
+│  <a href="#day-8">8</a>  │  <a href="#day-9">9</a>  │ <a href="#day-10">10</a>  │ <a href="#day-11">11</a>  │ <a href="#day-12">12</a>  │ 13  │ 14  │
 ├─────────────────────────────────────────┤
 │ 15  │ 16  │ 17  │ 18  │ 19  │ 20  │ 21  │
 ├─────────────────────────────────────────┤
@@ -27,6 +27,76 @@ input ← ¯1↓⊃read[1]
 The drop is usually useful in AoC as it removes the trailing newline from the data. If the data is already in the form of APL data (i.e. an array), then it can be executed with the hydrant symbol `⍎`.
 
 ---
+
+# Day 12
+## Part One
+
+Parsing the input will again require the venerable `split` function `split ← {(0=⍺|¯1+⍳≢⍵)⊂⍵}` and the following parser:
+```
+parseMoons ← { ⍝ parseMoons moonString
+  moons ← ⍵
+  ((moons='-')/moons) ← '¯'
+  ((moons=⎕UCS 10)/moons) ← ','
+  ↑3 split⍎(moons∊'¯0123456789,')/moons
+}
+```
+The new functionality here has to do with assignment. The second line finds places where `moons` has a `-` and replaces it with a `¯`; likewise the third line replaces line feeds with a comma. Both results are stored back in `moons`.
+
+In a given system of moons, the gravity _in one dimension_ can be calculated for all the moons at once with `gravity ← { {(+⌿⍵)-(+/⍵)}(⊢∘.>⊢)⍵ }`. This uses the train (trains were described in Day 6) `(⊢∘.>⊢)` which calculates a "times table" of elements of its righthand argument but with `>` instead of `×`. That is, `(⊢∘.>⊢)⍳3` is the matrix
+```
+0 0 0
+1 0 0
+1 1 0
+```
+and so the first row represents which elements in `⍳3` that the first is greater than; the second row represents which elements the seond element is greater than; and finally the third row represents which elements the third element is greater than. The columns then represent a less than relation (as `a>b` implies `b<a`) with the first column representing which elements of the vector that the first is less than, and so on. The gravity function then takes such a matrix and sums _down_ the columns and _across_ the rows, subtracting the row sum from the column sum. The ith row represents which moons the ith moon has a _greater_ value than, and so the count of these moons will have a negative affect while the sum of the ith column represents which moons it has a lesser coordinate value, the count of which will have a positive effect in the gravity calculation. The resulting vector is the gravity for all the moons.
+
+With a gravity calculation the entire system can be simulated:
+```
+sim ← { ⍝ n sim moons
+  step ← {
+    p v ← ⍵
+    v+ ← ⍉↑gravity¨↓[1]p
+    (p+v) v
+  }
+  (step⍣⍺) ⍵ ((⍴⍵)⍴0)
+}
+```
+This uses the power operator but with a numeric value instead of a test condition. `↓[1]p` is used to make a list of the columns of the position matrix and so a list of values of like coordinates.
+
+The total energy of the system can be calculated with `energy ← { +/×⌿↑(+/)¨|⍺ sim ⍵ }` and so the end result can be found with `{ 1000 energy parseMoons ⍵ }`.
+
+## Part Two
+
+The second part can be solved efficiently with a few key observations.
+* The first is that from any point in time, the previous state can be calculated by subtracting the current velocity from the positions and subtracting the gravity of the new positions from the velocity.
+* The second is that, because of the above observation, no two different states can yield the same state after applying gravity and velocity. Hence if there is a loop that loop _must_ include the initial state.
+* The third is that the periods of different coordinates are independent. Nothing that happens in the `y` or `z` coordinate is involved in the calculations of the `x` coordinate--orthogonal vectors are independent.
+* The fourth, then, is that the total period will be the least common multiple of the coordinate periods.
+
+Calculating the period of a coordinate vector can be done with:
+```
+period ← { ⍝ periods pos-vec
+  ipos ← ⍵
+  ivel ← (⍴⍵)⍴0
+  step ← { ⍝ step pos vel n
+    pos vel n ← ⍵
+    vel + ←gravity pos
+    pos + ←vel
+    pos vel (1+n)
+  }
+  test←{ ⍝ test pos vel n
+    pos vel ← ⍺[1 2]
+    ∧/(pos,vel)=(ipos,ivel)
+  }
+  3⊃(step⍣test) ⍵ ivel 0
+}
+```
+And the least common multiple of all the moons in a system can be found with `sim ← { ∧/period¨↓[1]parseMoons ⍵ }`.
+
+* [Day 12, Part 1](https://github.com/ummaycoc/aoc-2019.apl/blob/master/src/Day12/day12-part1.apl).
+* [Day 12, Part 2](https://github.com/ummaycoc/aoc-2019.apl/blob/master/src/Day12/day12-part2.apl).
+
+[This Day](#day-12) ◈ [Calendar](#december-2019) ◈ Next Day
 
 # Day 11
 ## Part One
@@ -120,7 +190,7 @@ Finally, the robot can paint the registration identifier with `{ ' *'[1+points 5
 * [Day 11, Part 1](https://github.com/ummaycoc/aoc-2019.apl/blob/master/src/Day11/day11-part1.apl).
 * [Day 11, Part 2](https://github.com/ummaycoc/aoc-2019.apl/blob/master/src/Day11/day11-part2.apl).
 
-[This Day](#day-11) ◈ [Calendar](#december-2019) ◈ Next Day
+[This Day](#day-11) ◈ [Calendar](#december-2019) ◈ [Next Day](#day-12)
 
 # Day 10
 ## Part One
