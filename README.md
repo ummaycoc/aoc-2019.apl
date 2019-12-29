@@ -6,7 +6,7 @@
 ├─────────────────────────────────────────┤
 │  <a href="#day-1">1</a>  │  <a href="#day-2">2</a>  │  <a href="#day-3">3</a>  │  <a href="#day-4">4</a>  │  <a href="#day-5">5</a>  │  <a href="#day-6">6</a>  │  <a href="#day-7">7</a>  │
 ├─────────────────────────────────────────┤
-│  <a href="#day-8">8</a>  │  <a href="#day-9">9</a>  │ <a href="#day-10">10</a>  │ <a href="#day-11">11</a>  │ <a href="#day-12">12</a>  │ <a href="#day-13">13</a>  │ 14  │
+│  <a href="#day-8">8</a>  │  <a href="#day-9">9</a>  │ <a href="#day-10">10</a>  │ <a href="#day-11">11</a>  │ <a href="#day-12">12</a>  │ <a href="#day-13">13</a>  │ <a href="#day-14">14</a>  │
 ├─────────────────────────────────────────┤
 │ 15  │ 16  │ 17  │ 18  │ 19  │ 20  │ 21  │
 ├─────────────────────────────────────────┤
@@ -27,6 +27,347 @@ input ← ¯1↓⊃read[1]
 The drop is usually useful in AoC as it removes the trailing newline from the data. If the data is already in the form of APL data (i.e. an array), then it can be executed with the hydrant symbol `⍎`.
 
 ---
+
+# Day 14
+## Part One
+
+Parsing a string of reactions can be done with the following three functions:
+```
+unjoin ← { (~∨⌿↑(1+-⍳≢⍺)∘.⌽⊂⍺⍷⍵)⊆⍵ }
+
+parseReaction ← { ⍝ parseReaction reactionString
+  amt ← { q c ← ' ' unjoin ⍵ ⋄ c (⍎q) }
+  r p ← ' => ' unjoin ⍵
+  r ← ', ' unjoin r
+  ↑amt¨(⊂p),r
+}
+
+parseRequirements ← { parseReaction¨(⎕UCS 10) unjoin ⍵ }
+```
+
+The only complicated part is `unjoin` which will split a string based on the presence of a separator. The function works by using `⍷` to find the start of the occurrences of the lefthand argument in the righthand argument. Using enclose `⊂` to turn this into a singleton list. `(1+-⍳≢⍺)` will be first `≢⍺` non-positive numbers, so if `≢⍺` is 3 then this will be `¯2 ¯1 0`. `∘.⌽` then will yield an outer product of applying these numbers to the rotate function with the single item on the right (the enclosed list).
+
+An example of what has been described so far: `'=>' { (1+-⍳≢⍺)∘.⌽⊂⍺⍷⍵ } 'abc => def => ghi'` would yield a list of two vectors: `0 0 0 0 1 0 0 0 0 0 0 1 0 0 0 0 0` and `0 0 0 0 0 1 0 0 0 0 0 0 1 0 0 0 0`. Using `↑` to turn this into a matrix gives
+```
+0 0 0 0 1 0 0 0 0 0 0 1 0 0 0 0 0
+0 0 0 0 0 1 0 0 0 0 0 0 1 0 0 0 0
+```
+and applying `~∨⌿` to this will first squash the rows with an or and then negate the results yielding `1 1 1 1 0 0 1 1 1 1 1 0 0 1 1 1 1` which has a `0` where `=>` appears. The final result is given via the partition function `⊆`.
+
+The result of parsing will be a list of reactions, each reaction will have rows of chemicals with names in the first column and quantities in the second column. The first item in each reaction is the product and the remaining are the reactants. The example requiring 165 ore would parse as:
+```
+  A    2   B    3   C    5   AB  1   BC  1   CA  1   FUEL  1   ORE  1
+  ORE  9   ORE  8   ORE  7   A   3   B   5   C   4   AB    2
+                             B   4   C   7   A   1   BC    3
+                                                     CA    4
+```
+where the first reaction says it takes 9 ORE to make 2 A.
+
+The following simple functions will be helpful:
+```
+ore ← { ⍵,(⊂1 2⍴'ORE' 1) }
+sort ← { ⍵[⍋⊃¨{⍵[1;1]}¨⍵] }
+chems ← { {∪⍵[⍋⍵]}⊃,/{⍵[;1]}¨⍵ }
+```
+* `ore` adds a single reaction to a parsed list of reactions; this reaction has only one product and no reactants;
+* `sort` will sort a parsed list of reactions by the name of the product;
+* `chems` will take the first columns of each reaction, join those lists together, and yield their unique sorted values.
+
+The `sort` function is more than a nicety, placing the reactions in order based on their product name means it will be easy to index into calculated values based on that ordering. The following function replaces the use of names in a parsed list of reactions with their ordinal position in the sorted list of chemicals:
+```
+intern ← {
+  ord ← chems ⍵
+  idx ← { c←⍵ ⋄ ({c≡⍵}¨ord)⍳1 }
+  { ⍉↑(idx¨⍵[;1]) (⍵[;2]) }¨⍵
+}
+```
+The interned value of the above referenced example is:
+```
+ 1 2  3 3  5 5  2 1  4 1  6 1  7 1
+ 8 9  8 8  8 7  1 3  3 5  5 4  2 2
+                3 4  5 7  1 1  4 3
+                               6 4
+```
+
+Now that each chemical's name has been replaced with a position within a list of chemicals, they can be turned into a vector of quantities--the first reaction above is equivalent to the vector `2 0 0 0 0 0 0 9` as it contains the same amount of information. The function `untable ← { r ← ⍺⍴0 ⋄ r[⍵[;1]] ← ⍵[;2] ⋄ r }` does this. Applying to the above, one could have `8 untable 1⊃ intern parseRequirements example_165_string` which would yield the aforementioned vector `2 0 0 0 0 0 0 9`.
+
+Turning a list of parsed reactions into a matrix of reactant requirements can be done with `matrix ← { n←≢⍵ ⋄ ↑{n untable ⍵}¨1↓¨⍵ }` which applies `untable` to the reactants of each reaction. This must be done _after_ the ORE reaction is added via the `ore` function as otherwise there will not be the correct number of columns. `matrix ore intern example_165_string` would yield
+```
+0 0 0 0 0 0 0 9
+0 0 0 0 0 0 0 8
+0 0 0 0 0 0 0 7
+3 0 4 0 0 0 0 0
+0 0 5 0 7 0 0 0
+1 0 0 0 4 0 0 0
+0 2 0 3 0 4 0 0
+0 0 0 0 0 0 0 0
+```
+but this matrix is incorrect--the column position of non-zero values represent chemicals in the _sorted list_ of chemicals but the rows are the reactants for reactions in the _order originally listed_ in the parsed string. That is, the second row does not represent the reactants for the chemical represented by the second column. If, before applying `intern`, the `sort` function is used then `matrix sort ore intern parseRequirements example_165_strin` would yield
+```
+0 0 0 0 0 0 0 9
+3 0 4 0 0 0 0 0
+0 0 0 0 0 0 0 8
+0 0 5 0 7 0 0 0
+0 0 0 0 0 0 0 7
+1 0 0 0 4 0 0 0
+0 2 0 3 0 4 0 0
+0 0 0 0 0 0 0 0
+```
+and now the second row represents the reactants that form the chemical represented by the second column.
+
+Given that these reactions form a directed acyclic graph the above matrix representation can be used to calculate a topological sort of the chemicals, yielding a list starting with fuel and ending with ore:
+```
+tops ← { ⍝ tops matrix
+  m ← 0≠⍵
+  order ← {
+    0=≢⍺: ⍵ ⍺
+    ⍺ ⍵
+  }
+  proc ← { ⍝ proc deps cur next out
+    deps cur next out ← ⍵
+    cur next ← cur order next
+    i ← 1⊃cur
+    r ← m[i;]
+    deps -← r
+    deps (1↓cur) (next,((0=deps)∧r)/⍳≢m) (out,i)
+  }
+  deps ← +⌿m
+  first ← 1⍴deps⍳0
+  4⊃(proc⍣(≢m)) deps first ⍬ ⍬
+}
+```
+
+Calculating the ore required for an interned list of reactions can be accomplished with:
+```
+calcOre ← { ⍝ calcOre interned
+  qty ← (⊃,[1]/1↑¨⍵)[;2]
+  m ← matrix ⍵
+  calc ← { ⍝ calc amts items
+    amts items ← ⍵
+    next ← ⊃items
+    mul ← ⌈amts[next]÷qty[next]
+    amts +← mul×m[next;]
+    amts[next] ← 0
+    (amts) (1↓items)
+  }
+  ⌈/⊃(calc⍣{0=≢2⊃⍺}) (0=+⌿m) (¯1↓tops m)
+}
+```
+The `qty` variable stores what product quantities are required for reactions; `calc` walks back from fuel via the topological sort of all the reactions, increasing requirements to make reactions proceed. The fuel is found by finding the zero column in `m` (Fuel will have zeroes as it is not _used_ in any reaction). In iterating across the topological sort, the last item is dropped as there are no reactions to _make_ ore.
+
+Finally the function `oreReq ← { calcOre intern sort ore parseRequirements ⍵ }` brings all the functions together to calculate a result.
+
+## Part Two
+
+Part two requires keeping track of the leftover reactants as products are consumed. It will also require using leftover reactants while calculating output, and so the `calcOre` function can be changed to do this:
+```
+calcOre ← { ⍝ {amount} calcOre interned
+  ⍺ ← (≢⍵)⍴0
+  initial ← ⍺
+  qty ← (⊃,[1]/1↑¨⍵)[;2]
+  m ← matrix ⍵
+  calc ← { ⍝ calc amts extras items
+    amts extras items ← ⍵
+    next ← ⊃items
+    needed ← 0⌈amts[next]-initial[next]
+    extras[next] ← qty[next]|-needed
+    mul ← ⌈needed÷qty[next]
+    amts +← mul×m[next;]
+    amts[next] ← 0
+    (amts) (extras) (1↓items)
+  }
+  ¯1↓(calc⍣{0=≢⊃⌽⍺}) (0=+⌿m) ((≢⍵)⍴0) (¯1↓tops m)
+}
+```
+The first line _assigns_ to the lefthand argument `⍺`; this gives `⍺` a default value--if `⍺` is given then this assignment _will not_ take place. The lefthand argument represents initial chemical stock that does not need to be produced, when not given there is nothing in stock. The `calc` function will now keep track of extra reactants produced to meet reaction needs. Note that taking the non-negative modulus of a negative value yields how much to add to that value to reach the modulus; that is `10|¯7` is `3` and `10=7+3`. `calcOre` now returns the vector representing the final ore requirements along with the vector of extra chemicals required along the way.
+
+Reactants can be reclaimed given enough products. While the reactions may not be able to run in reverse, this still makes equational sense since fewer runs of that reaction would have been required, and so products can be _melted_ down to their reactants with:
+```
+melt ← { ⍝ amounts melt interned
+  qty ← (⊃,[1]/1↑¨⍵)[;2]
+  m ← matrix ⍵
+  calc ← { ⍝ calc amts items
+    amts items ← ⍵
+    next ← ⊃items
+    mul ← ⌊amts[next]÷qty[next]
+    amts[next] ← qty[next]|amts[next]
+    amts +← mul×m[next;]
+    (amts) (1↓items)
+  }
+  ⊃(calc⍣{0=≢⊃⌽⍺}) ⍺ (¯1↓tops m)
+}
+```
+The lefthand argument is how much of each chemical exists and the righthand argument is the interned reaction (sorted, with ore). `qty` is just as it is in `calcOre`. Working backwards from the final fuel product, products are turned back into reactants (with leftovers found via modulus and stored in `amts[next]`).
+
+The following function processes interned (sorted with ore) data; it's merely a convenience to make the next function a bit easier on the eyes:
+```
+processInfo ← { ⍝ processInfo interned
+  data ← ⍵
+  qty ← (⊃,[1]/1↑¨data)[;2]
+  m ← matrix data
+  mod ← ↑qty×↓{⍵ ⍵⍴(1,(⍵⍴0))}≢m
+  melted ← ↑{⍵ melt data}¨↓mod
+  ordered ← tops m
+  oreIdx ← ⊃¯1↑ordered
+  oreMask ← oreIdx≠⍳≢m
+  ordered ← ¯1↓ordered
+  oreFuel extra ← calcOre data
+  oreFuel ← ⌈/oreFuel
+  qty mod melted ordered oreIdx oreMask oreFuel extra
+}
+```
+A quick description of all the calculated values:
+* `data` is merely the interned sorted data containing the `ore` reaction;
+* `qty` is the same as above, the quantity of products made in any reaction--the `i`th column is the quantity for making chemical `i`;
+* `m` is the matrix from part one where rows are reactant quantities (quantity of chemical `c` in reaction `r` is in row `r`, column `c`);
+* `mod` is a square matrix where the diagonal is the `qty` vector;
+* `melted`'s rows describe what products and ore are retreived by melting down `qty[c]` amount of chemical `c`;
+* `ordered` will be the topological sort of products excluding `ore`;
+* `oreIdx` is the index of the ore chemical;
+* `oreMask` is a boolean vector which is zero only at `oreIdx`;
+* `oreFuel` describes how much `ore` is needed to make one `fuel` (the answer to part one);
+* `extra` is how many leftover chemicals are leftover after making one fuel as in part one (the `i`th value represents the remaining amount of chemical `i`).
+
+Bringing this all together, the total amount of fuel that can be created from a given amount of ore can be calculated with:
+```
+useOre ← { ⍝ ore useOre interned
+  qty mod melted ordered oreIdx oreMask oreFuel extra←processInfo ⍵
+  meltdown ← { ⍝ meltdown amounts items
+    amounts items ← ⍵
+    next ← ⊃items
+    mul ← ⌊amounts[next]÷qty[next]
+    (mod[next;]|amounts+mul×melted[next;]) (1↓items)
+  }
+  calc ← { ⍝ calc ore amounts n
+    ore amounts n ← ⍵
+    q ← ⌊ore÷oreFuel
+    amounts ← ⊃(meltdown⍣{0=≢⊃⌽⍺}) (amounts+q×extra) ordered
+    (amounts[oreIdx]+oreFuel|ore) (oreMask×amounts) (n+q)
+  }
+  useExtra ← { ⍝ interned useExtra ore amounts n
+    ore amounts n ← ⍵
+    oreLeft newLeft ← amounts calcOre ⍺
+    oreLeft ← ⌈/oreLeft
+    ore<oreLeft: ⍵
+    (ore-oreLeft) newLeft (n+1)
+  }
+  ⍵ (useExtra⍣≡) (calc⍣≡) ⍺ ((≢⍵)⍴0) 0
+}
+```
+The `meltdown` function, when iterated with `ordered`, will melt as many of the leftover chemicals down to predecessor chemicals. For chemical `next`, calculate how much can be melted down from `amts[next]` with `mul×melted[next;]` where `mul` is how many times `next` can be melted down given `amts[next]`. Adding the melted down reactants to `amts` and taking the modulus `mod[next;]` will leave only the leftover amount of `next` after melting (`0|value` will always be `value` and `mod[next;]` only has one non-zero value).
+
+Given a current amount of `ore`, `calc` will do the simplest thing possible: split that ore into piles of size `oreFuel` and turn each pile into fuel. `q` is the number of piles. Each pile created `extra` chemicals in addition to fuel, and leftover amounts from the previous iteration are stored in `amounts` and so `amounts` is updated by melting down `amounts+q×extra` chemicals. The return value for the next iteration of `calc` has the ore after melting down (the value in `amounts[oreIdx]` is the ore after melting, `oreFuel|ore` is the amount that could not make a pile), the leftovers not including the `ore`, and an updated count of fuel created.
+
+Finally, after repeatedly splitting ore into piles, creating fuel, melting down products back into reactants, and iterating until no new fuel is created, `useExtra` will check if the leftover `ore` and leftover chemicals can form any fuel. This is done by passing the leftovers in `amounts` to `calcOre` as a lefthand argument and the interned data as the righthand argument (which is the lefthand argument to `useExtra`). If this requires more ore than there is available, then no new fuel is created, otherwise a new fuel is added.
+
+The three above functions are all brought together with the power operator `⍣`. `(calc⍣≡) ⍺ ((≢⍵)⍴0) 0` will iterate `calc` until there is no change in applying `calc` (i.e. a genuine fixpoint is found). `≡` is match and checks if its arguments are identical. Similarly `useExtra` will iterate until a genuine fixpoint is found, however `(useExtra⍣≡)` is given a lefthand argument, the interned data. With the power operator, the lefthand argument is passed to each iteration unchanged (whereas the righthand argument is the one that _updates_ with each iteration).
+
+The answer can be found with the function `consumeOre ← { 3⊃⍺ useOre intern sort ore parseRequirements ⍵ }`.
+
+## Part Two (Improved)
+
+The above recalculates the reactant matrix and quantity values multiple times despite these values not changing. This can be rectified by first adding the following function:
+```
+quantity ← { ⍝ quantity interned
+  q ← (≢⍵) (≢⍵) ⍴ 0
+  (1 1⍉q) ← (⊃,[1]/1↑¨⍵)[;2]
+  q
+}
+```
+which takes an interned list of reactions and returns a matrix with the product quantities listed along the diagonal in order. `1 1⍉q` is the diagonal of `q` (just believe) and so the quantities to the right of ← are assigned to its diagonal, which is exactly what we want here. This is the `qty` vector from before, but now that vector is the matrix diagonal.
+
+The `calcOre` function must be changed to accept the reactant matrix (formed from the `matrix` function) and the quantity matrix (formed from the `quantity` function). Some additional cleanup has happened on calculating the final result in `calc`, too:
+```
+calcOre ← { ⍝ {amount} calcOre (reactant-matrix quantity-matrix)
+  ⍺ ← (≢⊃⍵)⍴0
+  initial m qty ← (⊂⍺),⍵
+  calc ← { ⍝ calc amts extras items
+    amts extras items ← ⍵
+    next ← ⊃items
+    needed ← 0⌈amts[next]-initial[next]
+    extras[next] ← qty[next;next]|-needed
+    mul ← ⌈needed÷qty[next;next]
+    ((next≠⍳≢m)×amts+mul×m[next;]) (extras) (1↓items)
+  }
+  ¯1↓(calc⍣{0=≢⊃⌽⍺}) (0=+⌿m) (0×⍺) (¯1↓tops m)
+}
+```
+
+The `melt` function must also change and can, in fact, return the entire matrix of melted vectors:
+```
+melt ← { ⍝ reactant-matrix melt quantity-matrix → melted-matrix
+  m qty ← ⍺ ⍵
+  order ← ¯1↓tops m
+  calc ← { ⍝ calc amts items
+    amts items ← ⍵
+    next ← ⊃items
+    mul ← ⌊amts[next]÷qty[next;next]
+    amts[next] ← qty[next;next]|amts[next]
+    amts+ ← mul×m[next;]
+    (amts) (1↓items)
+  }
+  ↑{ ⊃(calc⍣{0=≢⊃⌽⍺})⍵ order }¨↓qty
+}
+```
+Note that it now takes the reactant matrix on the left and the quantity matrix on the right.
+
+Changes to the above facilitate changes to `processInfo`:
+```
+processInfo ← { ⍝ reactant-matrix processInfo quantity-matrix
+  melted ← ⍺ melt ⍵
+  ordered ← tops ⍺
+  oreIdx ← ⊃¯1↑ordered
+  oreMask ← oreIdx≠⍳≢⍺
+  ordered ← ¯1↓ordered
+  oreFuel extra ← calcOre ⍺ ⍵
+  oreFuel ← ⌈/oreFuel
+  melted ordered oreIdx oreMask oreFuel extra
+}
+```
+Of note is that the reactant matrix is now returned.
+
+The `useOre` function must also change as functions it uses have changed:
+```
+useOre ← { ⍝ ore useOre reactant-matrix quantity-matrix
+  reactants qty ← ⍵
+  melted ordered oreIdx oreMask oreFuel extra ← reactants processInfo qty
+  meltdown ← { ⍝ meltdown amounts items
+    amounts items ← ⍵
+    next ← ⊃items
+    mul ← ⌊amounts[next]÷qty[next;next]
+    (qty[next;]|amounts+mul×melted[next;]) (1↓items)
+  }
+  calc ← { ⍝ calc ore amounts n
+    ore amounts n ← ⍵
+    q ← ⌊ore÷oreFuel
+    amounts ← ⊃(meltdown⍣{0=≢⊃⌽⍺}) (amounts+q×extra) ordered
+    (amounts[oreIdx]+oreFuel|ore) (oreMask×amounts) (n+q)
+  }
+  useExtra ← { ⍝ useExtra ore amounts n
+    ore amounts n ← ⍵
+    oreLeft newLeft ← amounts calcOre reactants qty
+    oreLeft ← ⌈/oreLeft
+    ore<oreLeft: ⍵
+    (ore-oreLeft) newLeft (n+1)
+  }
+  (useExtra⍣≡) (calc⍣≡) ⍺ ((≢qty)⍴0) 0
+}
+```
+Note that there is no longer a `mod` matrix, this is why `qty` is a quantity matrix now, so that it can give both quantities along its diagonal and server to easily mod meltdown values.
+
+With `useOre` now taking matrices instead of the interned data, `consumeOre` must also change:
+```
+consumeOre ← {
+  i ← intern sort ore parseRequirements ⍵
+  3⊃⍺ useOre (matrix i) (quantity i)
+}
+```
+
+* [Day 14, Part 1](https://github.com/ummaycoc/aoc-2019.apl/blob/master/src/Day14/day14-part1.apl).
+* [Day 14, Part 2](https://github.com/ummaycoc/aoc-2019.apl/blob/master/src/Day14/day14-part2.apl).
+* [Day 14, Part 2](https://github.com/ummaycoc/aoc-2019.apl/blob/master/src/Day14/day14-part2-matrix.apl) (reactant/quantity matrices).
+
+[This Day](#day-14) ◈ [Calendar](#december-2019) ◈ Next Day
 
 # Day 13
 ## Part One
@@ -113,7 +454,7 @@ The `run` function executes the program by first "inserting" two quarters and th
 * [Day 13, Part 1](https://github.com/ummaycoc/aoc-2019.apl/blob/master/src/Day13/day13-part1.apl).
 * [Day 13, Part 2](https://github.com/ummaycoc/aoc-2019.apl/blob/master/src/Day13/day13-part2.apl).
 
-[This Day](#day-13) ◈ [Calendar](#december-2019) ◈ Next Day
+[This Day](#day-13) ◈ [Calendar](#december-2019) ◈ [Next Day](#day-14)
 
 # Day 12
 ## Part One
